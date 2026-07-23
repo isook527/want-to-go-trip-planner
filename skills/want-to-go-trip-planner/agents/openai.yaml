@@ -1,0 +1,7 @@
+interface:
+  display_name: "想去成行"
+  short_description: "核验跨平台地点和具体分店，并按真实交通生成可靠行程路线"
+  default_prompt: "使用 $want-to-go-trip-planner 把我发来的链接或截图整理进想去库，确认正确分店后再规划可靠行程。"
+
+policy:
+  allow_implicit_invocation: false
