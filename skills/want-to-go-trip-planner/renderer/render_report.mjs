@@ -130,7 +130,7 @@ function requestCard(report, locale, placeCount) {
       <div class="tier-list">
         <article class="tier-card free-tier">
           <p class="tier-name">${escapeHtml(en ? FREE_OFFER.nameEn : FREE_OFFER.nameZh)}</p>
-          <p class="tier-price">${escapeHtml(FREE_OFFER.price)}</p>
+          <p class="tier-price">${escapeHtml(en ? FREE_OFFER.priceEn : FREE_OFFER.price)}</p>
           <ul>${(en ? FREE_OFFER.featuresEn : FREE_OFFER.featuresZh).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
         </article>
         <article class="tier-card recommended-tier">

@@ -1,9 +1,9 @@
 {
-  "version": "2.1.1",
+  "version": "2.1.2",
   "contractVersion": "2.1.0",
   "sourcePolicyVersion": "2.1.0",
-  "passportTemplateMarker": "kornvia-passport-2.1.1",
-  "installDoctorMarker": "kornvia-install-doctor-2.1.1",
+  "passportTemplateMarker": "kornvia-passport-2.1.2",
+  "installDoctorMarker": "kornvia-install-doctor-2.1.2",
   "brand": {
     "productNameZh": "Kornvia 想去就出发",
     "productNameEn": "Kornvia Want to Go",
@@ -113,7 +113,8 @@
       "id": "free-library",
       "nameZh": "想去库与护照",
       "nameEn": "Want-to-go library and passport",
-      "price": "¥0",
+      "price": "免费使用",
+      "priceEn": "Free",
       "publicSalesEntry": true,
       "recommended": false,
       "featuresZh": [

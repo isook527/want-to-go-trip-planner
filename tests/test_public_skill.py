@@ -223,8 +223,9 @@ class PublicSkillRegressionTests(unittest.TestCase):
             "retainedClueCount": 2,
         }
         html = self.render(payload)
-        self.assertIn("kornvia-passport-2.1.1", html)
+        self.assertIn("kornvia-passport-2.1.2", html)
         self.assertIn(config["offers"]["free"]["price"], html)
+        self.assertNotIn("¥0", html)
         self.assertIn(config["offers"]["free"]["nameZh"], html)
         self.assertIn(config["offers"]["manualItineraryBeta"]["price"], html)
         self.assertIn(config["offers"]["manualItineraryBeta"]["nameZh"], html)
@@ -234,6 +235,9 @@ class PublicSkillRegressionTests(unittest.TestCase):
         self.assertIn(config["form"]["requestUrl"], html)
         self.assertIn("https://example.com/source", html)
         self.assertIn("另有 2 条地点线索已保留", html)
+        english_html = self.render({**payload, "locale": "en-US"})
+        self.assertIn(config["offers"]["free"]["priceEn"], english_html)
+        self.assertNotIn(config["offers"]["free"]["price"], english_html)
 
     def test_12_customer_outputs_have_no_internal_or_old_payment_terms(self):
         html = self.render(
@@ -403,7 +407,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
                 "retainedClueCount": 0,
             }
         )
-        self.assertIn("kornvia-passport-2.1.1", html)
+        self.assertIn("kornvia-passport-2.1.2", html)
         self.assertIn("background:#F2B51D;color:var(--ink)", html)
         self.assertIn(".photo{aspect-ratio:4/3", html)
         self.assertIn("flex:0 0 auto", html)
@@ -1388,8 +1392,8 @@ class PublicSkillRegressionTests(unittest.TestCase):
         self.assertIn("$productConfig.installDoctorMarker", windows_doctor)
         self.assertIn("PRODUCT_CONFIG.passportTemplateMarker", renderer)
         config = json.loads((SKILL / "config" / "product.json").read_text(encoding="utf-8"))
-        self.assertEqual(config["installDoctorMarker"], "kornvia-install-doctor-2.1.1")
-        self.assertEqual(config["passportTemplateMarker"], "kornvia-passport-2.1.1")
+        self.assertEqual(config["installDoctorMarker"], "kornvia-install-doctor-2.1.2")
+        self.assertEqual(config["passportTemplateMarker"], "kornvia-passport-2.1.2")
 
     def test_38_ffmpeg_doctor_uses_supported_version_flag(self):
         missing = {"installed": False, "version": "", "ready": False}
@@ -1445,7 +1449,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
 
     def test_43_product_config_is_the_single_commercial_and_version_source(self):
         config = product_config()
-        self.assertEqual(config["version"], "2.1.1")
+        self.assertEqual(config["version"], "2.1.2")
         self.assertTrue(config["offers"])
         self.assertEqual(config["form"]["publicOfferId"], "manual-itinerary-beta")
         self.assertTrue(config["form"]["intentOnly"])
