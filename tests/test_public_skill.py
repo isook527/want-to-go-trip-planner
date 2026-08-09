@@ -1903,6 +1903,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
             base = Path(tmp)
             manifest = base / "manifest.json"
             output = base / "evidence.json"
+            library_path = base / "library.json"
             url = "https://www.mafengwo.cn/i/123.html"
             manifest.write_text(json.dumps({
                 "bundleId": "mfw", "sources": [{
@@ -1921,6 +1922,19 @@ class PublicSkillRegressionTests(unittest.TestCase):
             self.assertEqual(result["failures"][0]["failureCode"], "PLATFORM_SECURITY_CHECK")
             self.assertEqual(result["failures"][0]["platform"], "mafengwo")
             self.assertEqual(result["failures"][0]["platformAccess"]["status"], "security_check_required")
+            with contextlib.redirect_stdout(io.StringIO()):
+                W2G.command_ingest(argparse.Namespace(
+                    library=str(library_path), evidence=str(output), operation_id="mfw-ingest",
+                ))
+            library = json.loads(library_path.read_text(encoding="utf-8"))
+            self.assertEqual(library["places"], [])
+            self.assertEqual(len(library["sources"]), 1)
+            source = library["sources"][0]
+            self.assertEqual(source["submittedUrl"], url)
+            self.assertEqual(source["failureCode"], "PLATFORM_SECURITY_CHECK")
+            self.assertEqual(source["platform"], "mafengwo")
+            self.assertEqual(source["platformAccess"]["status"], "security_check_required")
+            self.assertEqual(source["sourcePolicy"]["accessLevel"], "public_blocked")
 
     def test_64_platform_originals_enter_media_ledger_without_reencoding(self):
         with tempfile.TemporaryDirectory() as tmp:
