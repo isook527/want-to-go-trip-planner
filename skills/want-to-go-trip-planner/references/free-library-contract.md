@@ -35,7 +35,7 @@ Schema 的 `required` 是跨端最低必填；未列入 `required` 的属性为�
 
 迁移步骤固定：
 
-1. `schemaVersion` 升到 `2.0.0`；补 `library id / revision`。
+1. `schemaVersion` 升到 `2.1.0`；补 `library id / revision`；2.0.0 来源无损迁移并补平台访问字段。
 2. `destinationCollections` 转为 `destinations`。
 3. `bundles.evidence/failures` 无损投影到版本化 `sources`。
 4. 截图/视频路径与 SHA-256 投影到 `media`；原始媒体为 immutable。
@@ -50,7 +50,7 @@ Schema 的 `required` 是跨端最低必填；未列入 `required` 的属性为�
 
 ```json
 {
-  "schemaVersion": "2.0.0",
+  "schemaVersion": "2.1.0",
   "id": "library-demo",
   "revision": 1,
   "createdAt": "2026-08-09T00:00:00Z",
@@ -72,13 +72,13 @@ Schema 的 `required` 是跨端最低必填；未列入 `required` 的属性为�
       "id": "source-shot-commons", "ledgerVersion": 1, "batchId": "batch-demo", "group": "place-commons",
       "type": "screenshot", "status": "captured", "destinationKey": "bangkok",
       "submittedAt": "2026-08-09T00:00:00Z", "mediaIds": ["media-shot-commons-original"],
-      "sourcePolicy": {"version": "2.0.0", "accessLevel": "local_only", "canSupport": ["screenshot_content"], "cannotProve": ["original_url"], "untrustedInstructionsDetected": false}
+      "sourcePolicy": {"version": "2.1.0", "accessLevel": "local_only", "canSupport": ["screenshot_content"], "cannotProve": ["original_url"], "untrustedInstructionsDetected": false}
     },
     {
       "id": "source-link-commons", "ledgerVersion": 1, "batchId": "batch-demo", "group": "place-commons",
       "type": "link", "status": "captured", "destinationKey": "bangkok",
       "submittedAt": "2026-08-09T00:00:00Z", "submittedUrl": "https://example.com/customer-submitted", "mediaIds": [],
-      "sourcePolicy": {"version": "2.0.0", "accessLevel": "public_readable", "canSupport": ["original_url", "public_page_facts"], "cannotProve": ["future_opening_status"], "untrustedInstructionsDetected": false}
+      "sourcePolicy": {"version": "2.1.0", "accessLevel": "public_readable", "canSupport": ["original_url", "public_page_facts"], "cannotProve": ["future_opening_status"], "untrustedInstructionsDetected": false}
     }
   ],
   "media": [{
@@ -88,7 +88,7 @@ Schema 的 `required` 是跨端最低必填；未列入 `required` 的属性为�
   }],
   "verificationSnapshots": [{
     "id": "snapshot-bangkok-20260809", "destinationKey": "bangkok", "trigger": "pre_trip_on_demand",
-    "checkedAt": "2026-08-09T00:00:00Z", "sourcePolicyVersion": "2.0.0",
+    "checkedAt": "2026-08-09T00:00:00Z", "sourcePolicyVersion": "2.1.0",
     "items": [{"placeId": "place-commons", "status": "checked"}], "changes": []
   }],
   "tripRequests": [{

@@ -2,6 +2,7 @@
 """Extract local place evidence from public links, screenshots, or text."""
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import html
 from html.parser import HTMLParser
@@ -43,6 +44,7 @@ PLATFORM_MEDIA_HOSTS = {
     "youtube.com",
     "youtu.be",
 }
+PLATFORM_IMPORTS = PRODUCT_CONFIG.get("platformImports") or {}
 TIME_PATTERN = re.compile(
     r"(?:[01]?\d|2[0-3])[:：][0-5]\d\s*(?:-|–|—|至|~)\s*"
     r"(?:[01]?\d|2[0-3])[:：][0-5]\d"
@@ -184,6 +186,365 @@ def host_matches(hostname, domains):
     )
 
 
+def classify_link_platform(url):
+    hostname = urlparse(clean_text(url)).hostname or ""
+    for platform, settings in PLATFORM_IMPORTS.items():
+        if host_matches(hostname, settings.get("domains") or []):
+            return platform
+    return "generic_web"
+
+
+def standard_http_url(value):
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("link must use http or https")
+    if parsed.username or parsed.password:
+        raise ValueError("link must not contain embedded credentials")
+    allowed_port = 443 if parsed.scheme == "https" else 80
+    if parsed.port not in {None, allowed_port}:
+        raise ValueError("link must use the standard HTTP or HTTPS port")
+    return parsed.geturl()
+
+
+def opencli_executable():
+    executable = shutil.which("opencli")
+    if not executable:
+        raise ValueError(
+            "PLATFORM_ADAPTER_UNAVAILABLE: opencli is required for this platform URL"
+        )
+    return executable
+
+
+def run_opencli(arguments, timeout=60, expect_json=False):
+    result = subprocess.run(
+        [opencli_executable(), *arguments],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
+    )
+    if result.returncode != 0:
+        message = clean_text(result.stderr or result.stdout)[:500]
+        raise ValueError(f"PLATFORM_READ_FAILED: {message or 'opencli returned an error'}")
+    output = result.stdout.strip()
+    if expect_json:
+        try:
+            return json.loads(output)
+        except json.JSONDecodeError as error:
+            raise ValueError("PLATFORM_READ_FAILED: platform returned invalid JSON") from error
+    return output
+
+
+def mime_from_bytes(path):
+    with open(path, "rb") as handle:
+        prefix = handle.read(16)
+    if prefix.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if prefix.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if prefix.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if prefix.startswith(b"RIFF") and prefix[8:12] == b"WEBP":
+        return "image/webp"
+    if prefix.startswith(b"\x00\x00\x00") and b"ftyp" in prefix:
+        return "video/mp4"
+    return "application/octet-stream"
+
+
+def platform_media_files(folder):
+    if not folder or not os.path.isdir(folder):
+        return []
+    result = []
+    for path in sorted(Path(folder).rglob("*")):
+        if not path.is_file() or path.is_symlink():
+            continue
+        if path.name.endswith(".display.jpg"):
+            continue
+        mime = mime_from_bytes(path)
+        if not mime.startswith(("image/", "video/")):
+            continue
+        result.append({
+            "path": str(path.resolve()),
+            "sha256": file_sha256(path),
+            "mimeType": mime,
+            "immutableOriginal": True,
+        })
+    return result
+
+
+def prepare_platform_media_assets(files):
+    crop_script = os.path.join(os.path.dirname(__file__), "prepare_display_image.py")
+    def prepare_one(item):
+        prepared = item.copy()
+        if not clean_text(item.get("mimeType")).startswith("image/"):
+            return prepared
+        source_path = clean_text(item.get("path"))
+        display_path = str(Path(source_path).with_name(f"{Path(source_path).stem}.display.jpg"))
+        try:
+            result = subprocess.run(
+                [
+                    sys.executable, crop_script, source_path, display_path,
+                    "--target-aspect", "4:3", "--json",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            metadata = json.loads(result.stdout)
+            score = round(float(metadata.get("photoScore", 0.0)), 4)
+            eligible = bool(metadata.get("photoRich"))
+            prepared["displayPhotoScore"] = score
+            prepared["displayPhotoEligible"] = eligible
+            prepared["displayCrop"] = {
+                "strategy": clean_text(metadata.get("strategy")),
+                "targetAspect": metadata.get("targetAspect"),
+                "cropBox": metadata.get("cropBox"),
+            }
+            if eligible and os.path.isfile(display_path):
+                prepared["displayPath"] = display_path
+                prepared["displaySha256"] = file_sha256(display_path)
+            elif os.path.isfile(display_path):
+                os.unlink(display_path)
+        except (OSError, ValueError, json.JSONDecodeError, subprocess.SubprocessError) as error:
+            prepared["displayPhotoEligible"] = False
+            prepared["displayPreparationWarning"] = clean_text(error)
+        return prepared
+    if not files:
+        return []
+    with ThreadPoolExecutor(max_workers=min(4, len(files))) as executor:
+        return list(executor.map(prepare_one, files))
+
+
+def platform_engagement(payload):
+    aliases = {
+        "likes": ("likes", "likeCount", "点赞", "点赞数"),
+        "collects": ("collects", "collectCount", "收藏", "收藏数"),
+        "comments": ("comments", "commentCount", "评论", "评论数"),
+    }
+    result = {}
+    for target, keys in aliases.items():
+        value = next((payload.get(key) for key in keys if payload.get(key) is not None), None)
+        if value is not None and clean_text(value):
+            result[target] = clean_text(value)
+    return result
+
+
+def multi_place_document(value):
+    raw = str(value or "")
+    markers = re.findall(
+        r"(?:^|\n)\s*(?:Day\s*\d+|\d+[\.、)]|[1-9][️⃣⃣]|\*\*\s*\d+\\?\.)",
+        raw,
+        re.IGNORECASE,
+    )
+    named_sections = re.findall(
+        r"(?:^|\n)\s*\*\*[A-ZÀ-Þ][^*\n]{2,60}\*\*",
+        raw,
+    )
+    return len(markers) >= 2 or len(named_sections) >= 3
+
+
+def xiaohongshu_evidence(url, source, timeout):
+    parsed_url = urlparse(url)
+    if not host_matches(parsed_url.hostname, ["xiaohongshu.com"]):
+        raise ValueError(
+            "PLATFORM_INPUT_INCOMPLETE: 小红书短链已保留；请补充含 xsec_token 的完整笔记链接或截图"
+        )
+    query = parsed_url.query
+    if "xsec_token=" not in query:
+        raise ValueError(
+            "PLATFORM_INPUT_INCOMPLETE: 小红书链接已保留；读取正文需要含 xsec_token 的完整笔记链接或截图"
+        )
+    payload = run_opencli(
+        ["xiaohongshu", "note", url, "-f", "json"],
+        timeout=max(timeout, 60),
+        expect_json=True,
+    )
+    if isinstance(payload, list):
+        mapped = {
+            clean_text(item.get("field")): item.get("value")
+            for item in payload if isinstance(item, dict) and item.get("field")
+        }
+        payload = mapped or (payload[0] if payload and isinstance(payload[0], dict) else {})
+    if not isinstance(payload, dict):
+        raise ValueError("PLATFORM_READ_FAILED: 小红书笔记返回格式不可识别")
+    title = clean_text(payload.get("title") or payload.get("标题") or source.get("name"))
+    content = clean_text(
+        payload.get("content") or payload.get("desc") or payload.get("正文")
+    )
+    author = clean_text(payload.get("author") or payload.get("作者"))
+    engagement = platform_engagement(payload)
+    text_value = "\n".join(item for item in (title, author, content) if item)
+    if not clean_text(source.get("name")) and multi_place_document(text_value):
+        raise ValueError(
+            "PLATFORM_MULTIPLE_PLACES: 小红书笔记包含多个地点；原链接已保留，请指定要收纳的地点名或拆成多条来源"
+        )
+    media_folder = clean_text(source.get("platformMediaDirectory"))
+    media = []
+    if source.get("downloadMedia") and media_folder:
+        os.makedirs(media_folder, exist_ok=True)
+        run_opencli(
+            ["xiaohongshu", "download", url, "--output", media_folder],
+            timeout=max(timeout, 180),
+        )
+        media = prepare_platform_media_assets(platform_media_files(media_folder))
+    return {
+        "title": title,
+        "originalText": text_value,
+        "platform": "xiaohongshu",
+        "platformItemId": clean_text(payload.get("noteId") or payload.get("id")),
+        "platformAccess": {
+            "mode": "signed_note_url",
+            "status": "readable",
+            "checkedAt": now(),
+            "capabilities": [
+                "note_text_observed",
+                *(["engagement_counts_observed"] if engagement else []),
+                *(["platform_media_downloaded"] if media else []),
+            ],
+            "limitations": ["current_place_status_not_proven"],
+        },
+        "platformMediaFiles": media,
+        **({"platformEngagement": engagement} if engagement else {}),
+    }
+
+
+def ctrip_place_id(url):
+    match = re.search(r"/(\d+)\.html(?:$|[?#])", clean_text(url))
+    return match.group(1) if match else ""
+
+
+def ctrip_evidence(url, source, args):
+    query = clean_text(source.get("name") or args.name)
+    if not query:
+        raise ValueError(
+            "PLATFORM_INPUT_INCOMPLETE: 携程原链接已保留；请同时提供地点名或地点截图"
+        )
+    payload = run_opencli(
+        ["ctrip", "search", query, "--limit", "10", "-f", "json"],
+        timeout=max(args.timeout, 60),
+        expect_json=True,
+    )
+    candidates = [item for item in payload if isinstance(item, dict)] if isinstance(payload, list) else []
+    wanted_id = ctrip_place_id(url)
+    destination = clean_text(source.get("destination") or args.destination or args.city)
+    if wanted_id:
+        id_matches = [item for item in candidates if clean_text(item.get("id")) == wanted_id]
+        if id_matches:
+            candidates = id_matches
+    if destination and len(candidates) > 1:
+        destination_matches = [
+            item for item in candidates
+            if destination.casefold() in clean_text(item.get("cityName")).casefold()
+            or destination.casefold() in clean_text(item.get("name")).casefold()
+        ]
+        if destination_matches:
+            candidates = destination_matches
+    if not candidates:
+        raise ValueError("PLATFORM_NO_MATCH: 携程未找到与地点名、目的地或链接 ID 一致的候选")
+    if len(candidates) != 1:
+        labels = "；".join(clean_text(item.get("name")) for item in candidates[:5])
+        raise ValueError(f"PLATFORM_AMBIGUOUS: 携程存在多个地点或分店候选：{labels}")
+    item = candidates[0]
+    title = clean_text(item.get("name") or query)
+    original_text = "\n".join(
+        clean_text(value) for value in (
+            title, item.get("eName"), item.get("cityName"),
+            item.get("provinceName"), item.get("countryName"),
+        ) if clean_text(value)
+    )
+    return {
+        "title": title,
+        "originalText": original_text,
+        "structuredNames": unique([title, item.get("eName")]),
+        "platform": "ctrip",
+        "platformItemId": clean_text(item.get("id")),
+        "platformPlace": {
+            "name": title,
+            "englishName": clean_text(item.get("eName")),
+            "city": clean_text(item.get("cityName")),
+            "country": clean_text(item.get("countryName")),
+            "latitude": item.get("lat"),
+            "longitude": item.get("lon"),
+        },
+        "platformAccess": {
+            "mode": "name_search_with_url_preservation",
+            "status": "readable",
+            "checkedAt": now(),
+            "capabilities": [
+                "provider_place_id_observed", "place_name_observed",
+                "city_country_observed", "coordinates_observed",
+            ],
+            "limitations": ["submitted_detail_page_body_not_observed"],
+        },
+        "pageContentObserved": False,
+    }
+
+
+def parse_wechat_markdown(markdown):
+    title_match = re.search(r"^#\s+(.+)$", markdown, re.MULTILINE)
+    title = clean_text(title_match.group(1) if title_match else "")
+    images = unique(re.findall(r"!\[[^\]]*\]\((https?://[^)\s]+)", markdown))
+    return {
+        "title": title,
+        "originalText": markdown[:12000],
+        "publicImageUrls": images,
+    }
+
+
+def wechat_evidence(url, source, args):
+    markdown = run_opencli(
+        ["web", "read", "--url", url, "--stdout", "true", "--download-images", "false"],
+        timeout=max(args.timeout, 120),
+    )
+    lower = markdown.casefold()
+    if any(marker in lower for marker in ("安全检测", "验证码", "verification code", "访问过于频繁")):
+        raise ValueError("PLATFORM_SECURITY_CHECK: 公众号文章触发安全检测，原链接已保留")
+    parsed = parse_wechat_markdown(markdown)
+    if not parsed["title"] or len(clean_text(parsed["originalText"])) < 80:
+        raise ValueError("PLATFORM_READ_FAILED: 未读取到完整公众号文章正文")
+    if not clean_text(source.get("name") or args.name) and multi_place_document(markdown):
+        raise ValueError(
+            "PLATFORM_MULTIPLE_PLACES: 公众号文章包含多个地点；原链接已保留，请指定要收纳的地点名或拆成多条来源"
+        )
+    return {
+        **parsed,
+        "platform": "wechat_official",
+        "platformAccess": {
+            "mode": "public_article_browser_read",
+            "status": "readable",
+            "checkedAt": now(),
+            "capabilities": [
+                "article_title_observed", "article_body_observed",
+                *(["article_image_urls_observed"] if parsed["publicImageUrls"] else []),
+            ],
+            "limitations": ["article_image_files_not_copied"],
+        },
+    }
+
+
+def fetch_platform_link(url, source, args):
+    platform = classify_link_platform(url)
+    if platform == "xiaohongshu":
+        return xiaohongshu_evidence(url, source, args.timeout)
+    if platform == "ctrip":
+        return ctrip_evidence(url, source, args)
+    if platform == "wechat_official":
+        return wechat_evidence(url, source, args)
+    if platform == "mafengwo":
+        raise ValueError(
+            "PLATFORM_SECURITY_CHECK: 马蜂窝公开正文触发安全检测；原链接已保留，请补截图、保存网页或粘贴文字"
+        )
+    document, final_url = fetch_public_link(url, args.timeout)
+    parsed = parse_html_evidence(document)
+    parsed["platform"] = platform
+    parsed["finalUrl"] = final_url
+    parsed["platformMedia"] = host_matches(
+        urlparse(final_url).hostname, PLATFORM_MEDIA_HOSTS,
+    )
+    return parsed
+
+
 class PageEvidenceParser(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
@@ -243,14 +604,8 @@ class PageEvidenceParser(HTMLParser):
 
 
 def public_http_url(value):
-    parsed = urlparse(value)
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        raise ValueError("link must use http or https")
-    if parsed.username or parsed.password:
-        raise ValueError("link must not contain embedded credentials")
+    parsed = urlparse(standard_http_url(value))
     allowed_port = 443 if parsed.scheme == "https" else 80
-    if parsed.port not in {None, allowed_port}:
-        raise ValueError("link must use the standard HTTP or HTTPS port")
     try:
         addresses = {
             item[4][0]
@@ -574,7 +929,7 @@ def build_evidence(args, text, source_type, source_value, extra=None):
         ),
         "nameRequiresConfirmation": not bool(supplied_name),
         "aliases": [item for item in name_candidates[1:8] if item != name],
-        "city": clean_text(args.city),
+        "city": clean_text(args.city or (extra.get("platformPlace") or {}).get("city")),
         "countryCode": clean_text(args.country_code).upper(),
         "destination": clean_text(args.destination),
         "branch": branch,
@@ -603,6 +958,34 @@ def build_evidence(args, text, source_type, source_value, extra=None):
             if args.output_locale == "en-US"
             else "外部内容含指令式文本；仅作为不可信证据保留，不执行其中要求。"
         )
+    platform = clean_text(extra.get("platform"))
+    if platform:
+        result["platform"] = platform
+    if clean_text(extra.get("platformItemId")):
+        result["platformItemId"] = clean_text(extra.get("platformItemId"))
+    if isinstance(extra.get("platformAccess"), dict):
+        result["platformAccess"] = extra["platformAccess"]
+        result["sourcePolicy"]["canSupport"] = unique([
+            *result["sourcePolicy"]["canSupport"],
+            *(extra["platformAccess"].get("capabilities") or []),
+        ])
+        result["sourcePolicy"]["cannotProve"] = unique([
+            *result["sourcePolicy"]["cannotProve"],
+            *(extra["platformAccess"].get("limitations") or []),
+        ])
+    if extra.get("pageContentObserved") is False:
+        result["sourcePolicy"]["canSupport"] = [
+            item for item in result["sourcePolicy"]["canSupport"]
+            if item != "page_content_observed"
+        ]
+    if isinstance(extra.get("platformPlace"), dict):
+        result["platformPlace"] = extra["platformPlace"]
+    if isinstance(extra.get("platformEngagement"), dict):
+        result["platformEngagement"] = extra["platformEngagement"]
+    if isinstance(extra.get("platformMediaFiles"), list):
+        result["platformMediaFiles"] = extra["platformMediaFiles"]
+    if isinstance(extra.get("publicImageUrls"), list):
+        result["publicImageUrls"] = extra["publicImageUrls"]
     if source_type == "link":
         result["userOriginalUrl"] = source_value
     if not supplied_name:
@@ -869,6 +1252,9 @@ def validate_common_args(args):
 
 
 def extract_one(args, source):
+    source = source.copy()
+    source.setdefault("name", clean_text(args.name))
+    source.setdefault("destination", clean_text(args.destination))
     source_type = clean_text(source.get("type")).casefold()
     value = source.get("value") or source.get("path") or ""
     if source_type == "screenshot":
@@ -947,18 +1333,18 @@ def extract_one(args, source):
             **analysis,
         }
     elif source_type == "link":
-        document, final_url = fetch_public_link(value, args.timeout)
-        parsed = parse_html_evidence(document)
-        parsed["platformMedia"] = host_matches(
-            urlparse(final_url).hostname,
-            PLATFORM_MEDIA_HOSTS,
-        )
+        platform = classify_link_platform(value)
+        if platform == "generic_web":
+            public_http_url(value)
+        else:
+            standard_http_url(value)
+        parsed = fetch_platform_link(value, source, args)
         result = build_evidence(
             args,
             parsed["originalText"],
             "link",
             value,
-            {**parsed, "finalUrl": final_url},
+            parsed,
         )
     elif source_type in {"html", "saved_html"}:
         if not os.path.isfile(value):
@@ -1197,6 +1583,23 @@ def batch_extract(args):
         current_args = batch_args(args, manifest, source)
         try:
             validate_common_args(current_args)
+            if (
+                clean_text(source.get("type")).casefold() == "link"
+                and classify_link_platform(source.get("value") or "") == "xiaohongshu"
+                and storage_mode == "durable"
+                and args.output
+            ):
+                source.setdefault("downloadMedia", True)
+                source.setdefault(
+                    "platformMediaDirectory",
+                    os.path.join(
+                        os.path.dirname(os.path.abspath(args.output)),
+                        f"{os.path.splitext(os.path.basename(args.output))[0]}-assets",
+                        safe_asset_token(bundle_id),
+                        safe_asset_token(source.get("id")),
+                        "platform-originals",
+                    ),
+                )
             item = extract_one(current_args, source)
             evidence.append(
                 preserve_screenshot_asset(
@@ -1213,16 +1616,39 @@ def batch_extract(args):
             json.JSONDecodeError,
             subprocess.SubprocessError,
         ) as error:
+            reason = clean_text(error)
+            source_type = clean_text(source.get("type")).casefold()
+            platform = (
+                classify_link_platform(source.get("value") or "")
+                if source_type == "link" else ""
+            )
+            failure_code = reason.split(":", 1)[0] if reason.startswith("PLATFORM_") else "EXTRACTION_FAILED"
+            platform_status = (
+                "security_check_required" if failure_code == "PLATFORM_SECURITY_CHECK"
+                else "input_incomplete" if failure_code in {"PLATFORM_INPUT_INCOMPLETE", "PLATFORM_MULTIPLE_PLACES", "PLATFORM_AMBIGUOUS"}
+                else "unavailable"
+            )
             failures.append(
                 {
                     **source_public_ref(source),
                     "status": "failed",
-                    "reason": clean_text(error),
+                    "reason": reason,
+                    "failureCode": failure_code,
+                    **({"platform": platform} if platform else {}),
+                    **({
+                        "platformAccess": {
+                            "mode": clean_text((PLATFORM_IMPORTS.get(platform) or {}).get("mode")) or "generic_public_web",
+                            "status": platform_status,
+                            "checkedAt": now(),
+                            "capabilities": ["original_url_submitted"],
+                            "limitations": ["blocked_or_incomplete_source_contents"],
+                        }
+                    } if platform else {}),
                     "mustRemainVisible": True,
                     "sourcePolicy": source_policy(
-                        clean_text(source.get("type")).casefold(),
+                        source_type,
                         clean_text(source.get("value")),
-                        "public_blocked" if clean_text(source.get("type")).casefold() == "link" else "unavailable",
+                        "public_blocked" if source_type == "link" else "unavailable",
                         captured=False,
                     ),
                 }
@@ -1388,6 +1814,7 @@ def doctor_report(locale="zh-CN"):
     ocr_ready = ocr_provider != "none"
     ffmpeg = command_probe("ffmpeg", ("-version",))
     ffprobe = command_probe("ffprobe", ("-version",))
+    opencli = command_probe("opencli")
     video_ready = bool(ffmpeg["ready"] and ffprobe["ready"])
     core_ready = bool(platform_supported and python_ready and pillow["ready"] and node["ready"])
     full_ready = bool(core_ready and ocr_ready)
@@ -1464,6 +1891,12 @@ def doctor_report(locale="zh-CN"):
             "screenshotOcr": ocr_ready,
             "videoBinaryAnalysis": video_ready,
             "publicLinkExtraction": True,
+            "platformLinkImports": {
+                "xiaohongshu": bool(opencli["ready"]),
+                "ctrip": bool(opencli["ready"]),
+                "wechatOfficial": bool(opencli["ready"]),
+                "mafengwo": "local_evidence_fallback",
+            },
         },
         "dependencies": {
             "python": python,
@@ -1476,6 +1909,7 @@ def doctor_report(locale="zh-CN"):
             "tesseract": tesseract,
             "ffmpeg": ffmpeg,
             "ffprobe": ffprobe,
+            "opencli": opencli,
         },
         "ocrProvider": ocr_provider,
         "blockingIssues": blocking_issues,
@@ -1484,7 +1918,7 @@ def doctor_report(locale="zh-CN"):
         "videoSceneLimit": MAX_VIDEO_SCENES,
         "privacy": {
             "uploadsOriginalScreenshot": False,
-            "usesBrowserCookies": False,
+            "usesBrowserCookies": bool(opencli["ready"]),
             "acceptsPrivateCollectionCredentials": False,
         },
     }

@@ -85,6 +85,9 @@ class PublicSkillRegressionTests(unittest.TestCase):
         self.assertIn("出发前按需复核为 ¥39.9", output)
         self.assertIn("人工逐日行程内测为 ¥199", output)
         self.assertIn("不代订、不持续监控", output)
+        self.assertIn("小红书完整笔记链接、携程地点链接和公开公众号文章", output)
+        self.assertIn("马蜂窝遇安全检测时会保留原链接", output)
+        self.assertIn("多地点文章不会冒充一个地点", output)
         for banned in ("OCR", "模型", "宿主诊断", "/Users/", ".workbuddy", "localhost"):
             self.assertNotIn(banned, output)
 
@@ -217,7 +220,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
             "retainedClueCount": 2,
         }
         html = self.render(payload)
-        self.assertIn("kornvia-passport-2.0.0", html)
+        self.assertIn("kornvia-passport-2.1.0", html)
         self.assertIn("¥39.9", html)
         self.assertIn("¥199", html)
         self.assertIn("出发前复核", html)
@@ -390,7 +393,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
                 "retainedClueCount": 0,
             }
         )
-        self.assertIn("kornvia-passport-2.0.0", html)
+        self.assertIn("kornvia-passport-2.1.0", html)
         self.assertIn("background:#F2B51D;color:var(--ink)", html)
         self.assertIn(".photo{aspect-ratio:4/3", html)
         self.assertIn("flex:0 0 auto", html)
@@ -1099,7 +1102,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
             library = W2G.load_library(library_path)
             W2G.save_library(library_path, library)
             migrated = json.loads(library_path.read_text(encoding="utf-8"))
-            self.assertEqual(migrated["schemaVersion"], "2.0.0")
+            self.assertEqual(migrated["schemaVersion"], "2.1.0")
             self.assertEqual({item["key"] for item in migrated["destinations"]}, {"shanghai", "bangkok"})
             self.assertIn("sources", migrated)
             self.assertIn("media", migrated)
@@ -1367,8 +1370,8 @@ class PublicSkillRegressionTests(unittest.TestCase):
         self.assertIn("$productConfig.installDoctorMarker", windows_doctor)
         self.assertIn("PRODUCT_CONFIG.passportTemplateMarker", renderer)
         config = json.loads((SKILL / "config" / "product.json").read_text(encoding="utf-8"))
-        self.assertEqual(config["installDoctorMarker"], "kornvia-install-doctor-2.0.0")
-        self.assertEqual(config["passportTemplateMarker"], "kornvia-passport-2.0.0")
+        self.assertEqual(config["installDoctorMarker"], "kornvia-install-doctor-2.1.0")
+        self.assertEqual(config["passportTemplateMarker"], "kornvia-passport-2.1.0")
 
     def test_38_ffmpeg_doctor_uses_supported_version_flag(self):
         missing = {"installed": False, "version": "", "ready": False}
@@ -1424,7 +1427,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
 
     def test_43_product_config_is_the_single_commercial_and_version_source(self):
         config = json.loads((SKILL / "config" / "product.json").read_text(encoding="utf-8"))
-        self.assertEqual(config["version"], "2.0.0")
+        self.assertEqual(config["version"], "2.1.0")
         self.assertEqual(config["offers"]["free"]["price"], "¥0")
         self.assertEqual(config["offers"]["preTripReview"]["price"], "¥39.9")
         self.assertEqual(config["offers"]["manualItineraryBeta"]["price"], "¥199")
@@ -1440,7 +1443,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
 
     def test_44_shared_schema_covers_every_required_v2_entity(self):
         schema = json.loads((SKILL / "references" / "shared-data-contract-v2.schema.json").read_text(encoding="utf-8"))
-        self.assertEqual(schema["properties"]["schemaVersion"]["const"], "2.0.0")
+        self.assertEqual(schema["properties"]["schemaVersion"]["const"], "2.1.0")
         for field in (
             "destinations", "places", "sources", "media",
             "verificationSnapshots", "tripRequests", "events", "tombstones",
@@ -1594,7 +1597,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
                 check=True, capture_output=True, text=True,
             )
             migrated = json.loads(library_path.read_text(encoding="utf-8"))
-            self.assertEqual(migrated["schemaVersion"], "2.0.0")
+            self.assertEqual(migrated["schemaVersion"], "2.1.0")
             self.assertEqual(migrated["sources"][0]["submittedUrl"], "https://example.com/legacy")
             self.assertEqual(migrated["sources"][0]["ledgerVersion"], 1)
 
@@ -1758,6 +1761,178 @@ class PublicSkillRegressionTests(unittest.TestCase):
             self.assertEqual([item["id"] for item in loaded["sources"]], ["source-v2"])
             self.assertEqual([item["id"] for item in loaded["media"]], ["media-v2"])
             self.assertEqual(W2G.validate_library_contract(loaded), [])
+
+    def test_57_platform_domains_are_classified_without_subdomain_confusion(self):
+        cases = {
+            "https://www.xiaohongshu.com/explore/abc?xsec_token=t": "xiaohongshu",
+            "https://you.ctrip.com/sight/city/123.html": "ctrip",
+            "https://mp.weixin.qq.com/s/abc": "wechat_official",
+            "https://www.mafengwo.cn/i/123.html": "mafengwo",
+            "https://notxiaohongshu.com/explore/abc": "generic_web",
+        }
+        for url, expected in cases.items():
+            self.assertEqual(EXTRACT.classify_link_platform(url), expected)
+
+    def test_58_xiaohongshu_requires_signed_url_and_parses_note(self):
+        source = {"name": "", "downloadMedia": False}
+        with self.assertRaisesRegex(ValueError, "xsec_token"):
+            EXTRACT.xiaohongshu_evidence(
+                "https://www.xiaohongshu.com/explore/note", source, 15,
+            )
+        payload = {
+            "title": "曼谷河边咖啡馆", "author": "旅行者",
+            "content": "地址在昭披耶河边", "noteId": "note-1", "likes": "9483",
+        }
+        with mock.patch.object(EXTRACT, "run_opencli", return_value=payload):
+            result = EXTRACT.xiaohongshu_evidence(
+                "https://www.xiaohongshu.com/explore/note?xsec_token=token",
+                source, 15,
+            )
+        self.assertEqual(result["platform"], "xiaohongshu")
+        self.assertIn("地址在昭披耶河边", result["originalText"])
+        self.assertIn("note_text_observed", result["platformAccess"]["capabilities"])
+        self.assertEqual(result["platformEngagement"], {"likes": "9483"})
+        self.assertIn("engagement_counts_observed", result["platformAccess"]["capabilities"])
+
+    def test_59_platform_media_uses_magic_bytes_not_file_extension(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            nested = Path(tmp) / "note-id"
+            nested.mkdir()
+            path = nested / "download.jpg"
+            Image.new("RGB", (12, 12), "red").save(path, format="WEBP")
+            files = EXTRACT.platform_media_files(tmp)
+            self.assertEqual(files[0]["mimeType"], "image/webp")
+            self.assertTrue(files[0]["immutableOriginal"])
+            self.assertRegex(files[0]["sha256"], r"^[a-f0-9]{64}$")
+
+    def test_59b_platform_images_are_scored_individually_and_originals_stay_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            photo = base / "photo.jpg"
+            text_page = base / "text.jpg"
+            image = Image.new("RGB", (360, 720))
+            pixels = image.load()
+            for y in range(720):
+                for x in range(360):
+                    pixels[x, y] = ((x * 7 + y * 3) % 256, (x * 2 + y * 11) % 256, (x * 13 + y * 5) % 256)
+            image.save(photo)
+            Image.new("RGB", (360, 720), "white").save(text_page)
+            originals = EXTRACT.platform_media_files(tmp)
+            before = {item["path"]: item["sha256"] for item in originals}
+            prepared = EXTRACT.prepare_platform_media_assets(originals)
+            after = {item["path"]: EXTRACT.file_sha256(item["path"]) for item in prepared}
+            self.assertEqual(before, after)
+            by_name = {Path(item["path"]).name: item for item in prepared}
+            self.assertTrue(by_name["photo.jpg"]["displayPhotoEligible"])
+            self.assertTrue(Path(by_name["photo.jpg"]["displayPath"]).is_file())
+            self.assertFalse(by_name["text.jpg"]["displayPhotoEligible"])
+            self.assertNotIn("displayPath", by_name["text.jpg"])
+            rescanned_names = {Path(item["path"]).name for item in EXTRACT.platform_media_files(tmp)}
+            self.assertEqual(rescanned_names, {"photo.jpg", "text.jpg"})
+
+    def test_60_ctrip_matches_submitted_page_id_and_destination(self):
+        candidates = [
+            {"id": "6790117", "name": "大皇宫, 曼谷, 泰国", "eName": "The Grand Palace", "cityName": "曼谷", "countryName": "泰国", "lat": 13.7, "lon": 100.4},
+            {"id": "6788305", "name": "巴黎大皇宫, 巴黎, 法国", "cityName": "巴黎", "countryName": "法国", "lat": 48.8, "lon": 2.3},
+        ]
+        args = argparse.Namespace(name="大皇宫", destination="曼谷", city="", timeout=15)
+        with mock.patch.object(EXTRACT, "run_opencli", return_value=candidates):
+            result = EXTRACT.ctrip_evidence(
+                "https://you.ctrip.com/sight/bangkok359/6790117.html",
+                {"name": "大皇宫", "destination": "曼谷"}, args,
+            )
+        self.assertEqual(result["platformItemId"], "6790117")
+        self.assertEqual(result["platformPlace"]["city"], "曼谷")
+        self.assertEqual(result["platformPlace"]["latitude"], 13.7)
+
+    def test_61_ctrip_never_silently_chooses_an_ambiguous_branch(self):
+        args = argparse.Namespace(name="大皇宫", destination="", city="", timeout=15)
+        with mock.patch.object(EXTRACT, "run_opencli", return_value=[
+            {"id": "1", "name": "地点 A", "cityName": "甲城"},
+            {"id": "2", "name": "地点 B", "cityName": "乙城"},
+        ]):
+            with self.assertRaisesRegex(ValueError, "PLATFORM_AMBIGUOUS"):
+                EXTRACT.ctrip_evidence(
+                    "https://you.ctrip.com/sight/example.html",
+                    {"name": "大皇宫"}, args,
+                )
+
+    def test_62_wechat_parser_keeps_article_body_and_image_urls(self):
+        markdown = "# 曼谷三日散步\n\n作者：Korn\n\n这里是足够长的公开文章正文，包含路线、地点和实际体验。" * 3 + "\n![河边](https://mmbiz.qpic.cn/image.jpg)"
+        with mock.patch.object(EXTRACT, "run_opencli", return_value=markdown):
+            result = EXTRACT.wechat_evidence(
+                "https://mp.weixin.qq.com/s/article",
+                {"name": "曼谷三日散步"},
+                argparse.Namespace(name="曼谷三日散步", timeout=15),
+            )
+        self.assertEqual(result["title"], "曼谷三日散步")
+        self.assertEqual(result["publicImageUrls"], ["https://mmbiz.qpic.cn/image.jpg"])
+        self.assertIn("article_body_observed", result["platformAccess"]["capabilities"])
+
+    def test_62b_multi_place_platform_document_is_not_promoted_as_one_place(self):
+        markdown = "# 曼谷旅行\n\n**1. Open House**\n地址 A\n\n**2. MOCA Bangkok**\n地址 B\n\n**3. The Jam Factory**\n地址 C"
+        with mock.patch.object(EXTRACT, "run_opencli", return_value=markdown):
+            with self.assertRaisesRegex(ValueError, "PLATFORM_MULTIPLE_PLACES"):
+                EXTRACT.wechat_evidence(
+                    "https://mp.weixin.qq.com/s/article", {},
+                    argparse.Namespace(name="", timeout=15),
+                )
+
+    def test_63_mafengwo_security_check_preserves_original_url_in_batch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            manifest = base / "manifest.json"
+            output = base / "evidence.json"
+            url = "https://www.mafengwo.cn/i/123.html"
+            manifest.write_text(json.dumps({
+                "bundleId": "mfw", "sources": [{
+                    "id": "mfw-1", "type": "link", "value": url,
+                    "name": "曼谷地点", "destination": "曼谷",
+                }],
+            }, ensure_ascii=False), encoding="utf-8")
+            args = argparse.Namespace(
+                manifest=str(manifest), output=str(output), output_locale="zh-CN",
+                name="", city="", country_code="", destination="",
+                source_language="auto", ocr_engine="auto", languages="", timeout=15,
+            )
+            EXTRACT.batch_extract(args)
+            result = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(result["failures"][0]["value"], url)
+            self.assertEqual(result["failures"][0]["failureCode"], "PLATFORM_SECURITY_CHECK")
+            self.assertEqual(result["failures"][0]["platform"], "mafengwo")
+            self.assertEqual(result["failures"][0]["platformAccess"]["status"], "security_check_required")
+
+    def test_64_platform_originals_enter_media_ledger_without_reencoding(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "platform.jpg"
+            display = Path(tmp) / "platform.display.jpg"
+            Image.new("RGB", (20, 20), "blue").save(path, format="WEBP")
+            Image.new("RGB", (20, 15), "blue").save(display, format="JPEG")
+            digest = W2G.sha256_if_file(path)
+            library = W2G.empty_library()
+            library["bundles"] = [{
+                "bundleId": "platform-batch", "destination": "曼谷", "failures": [],
+                "evidence": [{
+                    "sourceId": "xhs-1", "sourceType": "link", "destination": "曼谷",
+                    "userOriginalUrl": "https://www.xiaohongshu.com/explore/n?xsec_token=t",
+                    "platform": "xiaohongshu", "platformMediaFiles": [{
+                        "path": str(path), "sha256": digest, "mimeType": "image/webp",
+                        "immutableOriginal": True, "displayPath": str(display),
+                        "displaySha256": W2G.sha256_if_file(display),
+                        "displayPhotoEligible": True, "displayPhotoScore": 0.91,
+                        "displayCrop": {"strategy": "photo-window"},
+                    }],
+                }],
+            }]
+            W2G.rebuild_source_ledger(library)
+            W2G.rebuild_media_ledger(library)
+            originals = [item for item in library["media"] if item["role"] == "original"]
+            displays = [item for item in library["media"] if item["role"] == "display_crop"]
+            self.assertEqual(originals[0]["sha256"], digest)
+            self.assertEqual(originals[0]["mimeType"], "image/webp")
+            self.assertTrue(originals[0]["immutableOriginal"])
+            self.assertEqual(displays[0]["derivedFromMediaId"], originals[0]["id"])
+            self.assertEqual(displays[0]["displayPhotoScore"], 0.91)
 
 
 if __name__ == "__main__":

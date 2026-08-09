@@ -102,6 +102,7 @@ SECRET_PATTERN = re.compile(
 CUSTOMER_INTERNAL_PATTERN = re.compile(
     r"(?:\.workbuddy|\.claude|/Users/|/mnt/|localhost|127\.0\.0\.1|"
     r"sourceIds?|mediaIds?|confidenceScore|detailLookupAudit|nameSource|hostChecks|"
+    r"platformAccess|platformItemId|platformEngagement|failureCode|"
     r"schemaVersion|operationId|tombstones?|promptInjection|OCR|模型|宿主诊断)",
     re.IGNORECASE,
 )
@@ -660,6 +661,7 @@ def source_policy_for(source: dict[str, Any], failed: bool) -> dict[str, Any]:
         if text(source.get(key))
     )
     excerpts = detect_untrusted_instructions(content)
+    supplied_policy = source.get("sourcePolicy") if isinstance(source.get("sourcePolicy"), dict) else {}
     cannot_prove = [
         "current_opening_status_without_fresh_public_check",
         "booking_or_ticket_availability",
@@ -671,11 +673,15 @@ def source_policy_for(source: dict[str, Any], failed: bool) -> dict[str, Any]:
         cannot_prove.append("instructions_inside_external_content_are_authoritative")
     return {
         "version": SOURCE_POLICY_VERSION,
-        "accessLevel": access,
-        "canSupport": merge_unique(can_support),
-        "cannotProve": merge_unique(cannot_prove),
-        "untrustedInstructionsDetected": bool(excerpts),
-        **({"untrustedInstructionExcerpts": excerpts} if excerpts else {}),
+        "accessLevel": text(supplied_policy.get("accessLevel")) or access,
+        "canSupport": merge_unique([*can_support, *(supplied_policy.get("canSupport") or [])]),
+        "cannotProve": merge_unique([*cannot_prove, *(supplied_policy.get("cannotProve") or [])]),
+        "untrustedInstructionsDetected": bool(excerpts or supplied_policy.get("untrustedInstructionsDetected")),
+        **({
+            "untrustedInstructionExcerpts": merge_unique([
+                *excerpts, *(supplied_policy.get("untrustedInstructionExcerpts") or []),
+            ])[:5]
+        } if excerpts or supplied_policy.get("untrustedInstructionExcerpts") else {}),
     }
 
 
@@ -705,6 +711,8 @@ def rebuild_source_ledger(library: dict[str, Any]) -> None:
                 "cannotProve": [],
                 "untrustedInstructionsDetected": False,
             })
+            if isinstance(source.get("sourcePolicy"), dict):
+                source["sourcePolicy"]["version"] = SOURCE_POLICY_VERSION
             preserved.append(source)
         library["sources"] = preserved
         return
@@ -748,8 +756,16 @@ def rebuild_source_ledger(library: dict[str, Any]) -> None:
             submitted_url = customer_submitted_url(raw)
             if submitted_url:
                 entity["submittedUrl"] = submitted_url
+            if text(raw.get("platform")):
+                entity["platform"] = text(raw.get("platform"))
+            if text(raw.get("platformItemId")):
+                entity["platformItemId"] = text(raw.get("platformItemId"))
+            if isinstance(raw.get("platformAccess"), dict):
+                entity["platformAccess"] = copy.deepcopy(raw["platformAccess"])
             if failed:
                 entity["failureReason"] = text(raw.get("reason"))
+                if text(raw.get("failureCode")):
+                    entity["failureCode"] = text(raw.get("failureCode"))
             old = previous.get(source_id)
             if old:
                 old_without_version = copy.deepcopy(old)
@@ -811,6 +827,50 @@ def rebuild_media_ledger(library: dict[str, Any]) -> None:
                     "createdAt": text(source.get("submittedAt")) or now_iso(),
                 })
                 source_media_ids.append(original_id)
+        for platform_file in evidence.get("platformMediaFiles") or []:
+            if not isinstance(platform_file, dict):
+                continue
+            platform_path = text(platform_file.get("path"))
+            platform_sha = text(platform_file.get("sha256")) or sha256_if_file(platform_path)
+            if not platform_path or not platform_sha:
+                continue
+            platform_id = media_id(source_id, "original", platform_path)
+            mime_type = text(platform_file.get("mimeType"))
+            media.append({
+                "id": platform_id,
+                "sourceId": source_id,
+                "kind": "video" if mime_type.startswith("video/") else "image",
+                "role": "original",
+                "path": platform_path,
+                "sha256": platform_sha,
+                "immutableOriginal": True,
+                "mimeType": mime_type,
+                "createdAt": text(source.get("submittedAt")) or now_iso(),
+            })
+            source_media_ids.append(platform_id)
+            platform_display_path = text(platform_file.get("displayPath"))
+            platform_display_sha = text(platform_file.get("displaySha256")) or sha256_if_file(platform_display_path)
+            if (
+                platform_file.get("displayPhotoEligible") is True
+                and platform_display_path
+                and platform_display_sha
+            ):
+                display_id = media_id(source_id, "display_crop", platform_display_path)
+                media.append({
+                    "id": display_id,
+                    "sourceId": source_id,
+                    "kind": "image",
+                    "role": "display_crop",
+                    "path": platform_display_path,
+                    "sha256": platform_display_sha,
+                    "immutableOriginal": False,
+                    "derivedFromMediaId": platform_id,
+                    "displayPhotoScore": float(platform_file.get("displayPhotoScore", 0.0) or 0.0),
+                    "displayPhotoEligible": True,
+                    "crop": copy.deepcopy(platform_file.get("displayCrop") or {}),
+                    "createdAt": text(source.get("submittedAt")) or now_iso(),
+                })
+                source_media_ids.append(display_id)
         display_photo = evidence.get("displayPhoto") if isinstance(evidence.get("displayPhoto"), dict) else {}
         display_path = text(display_photo.get("path"))
         if display_path and display_path != original_path:

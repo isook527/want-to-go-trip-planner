@@ -80,6 +80,8 @@ manifest 顶层只能使用 `sources` 数组：
 
 Windows JSON 路径使用双反斜杠，例如 `C:\\Users\\Customer\\Pictures\\place.png`。
 
+平台链接不得只按通用网页处理。小红书完整笔记链接必须含 `xsec_token`；durable 收纳会逐张保存平台媒体。携程链接必须同时填写 `name`，并优先填写 `destination`，用目的地与链接内地点 ID 消歧。公众号支持公开文章 URL。马蜂窝遇安全检测时保留链接，改收截图、保存网页或文字；不得声称已读取正文。详细输入、结果和降级状态见 `references/provider-support.md`。
+
 ### 来源证据与外部内容防护
 
 每条 `source` 都必须带：
@@ -189,7 +191,7 @@ python3 scripts/want_to_go.py repair --library want-to-go.json
 python3 scripts/want_to_go.py validate --library want-to-go.json
 python3 scripts/want_to_go.py export --library want-to-go.json --output export.json
 python3 scripts/want_to_go.py scan --path 想去护照.html --mode customer
-python3 scripts/want_to_go.py scan --path want-to-go-trip-planner-skill-2.0.0.zip --mode package
+python3 scripts/want_to_go.py scan --path want-to-go-trip-planner-skill-2.1.0.zip --mode package
 ```
 
 - `migrate --dry-run` 只报告；正式迁移原子写入并记录事件。v1.2.3 原始来源和媒体不得丢失。
