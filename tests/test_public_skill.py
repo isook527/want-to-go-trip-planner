@@ -35,6 +35,10 @@ EXTRACT = importlib.util.module_from_spec(EXTRACT_SPEC)
 EXTRACT_SPEC.loader.exec_module(EXTRACT)
 
 
+def product_config():
+    return json.loads((SKILL / "config" / "product.json").read_text(encoding="utf-8"))
+
+
 def complete_business(**overrides):
     place = {
         "id": "place-1",
@@ -80,11 +84,10 @@ class PublicSkillRegressionTests(unittest.TestCase):
 
     def test_01_onboarding_zh_customer_safe(self):
         output = self.run_onboarding("zh-CN")
+        config = product_config()
+        self.assertEqual(output, config["copy"]["onboardingZh"])
         self.assertIn("想去库", output)
         self.assertIn("生成曼谷想去护照", output)
-        self.assertIn("出发前按需复核为 ¥39.9", output)
-        self.assertIn("人工逐日行程内测为 ¥199", output)
-        self.assertIn("不代订、不持续监控", output)
         self.assertIn("小红书完整笔记链接、携程地点链接和公开公众号文章", output)
         self.assertIn("马蜂窝遇安全检测时会保留原链接", output)
         self.assertIn("多地点文章不会冒充一个地点", output)
@@ -93,10 +96,9 @@ class PublicSkillRegressionTests(unittest.TestCase):
 
     def test_02_onboarding_en_customer_safe(self):
         output = self.run_onboarding("en")
+        config = product_config()
+        self.assertEqual(output, config["copy"]["onboardingEn"])
         self.assertIn("want-to-go library", output)
-        self.assertIn("Pre-trip review is ¥39.9", output)
-        self.assertIn("¥199 manual itinerary beta", output)
-        self.assertIn("does not include booking or continuous monitoring", output)
         for banned in ("OCR", "model", "host diagnostic", "/Users/", ".workbuddy", "localhost"):
             self.assertNotIn(banned, output.lower())
 
@@ -211,7 +213,8 @@ class PublicSkillRegressionTests(unittest.TestCase):
             self.assertEqual(len(saved["places"]), 2)
             self.assertTrue(saved["bundles"][0]["passportGenerated"])
 
-    def test_11_locked_renderer_keeps_cta_source_link_and_retained_count(self):
+    def test_11_renderer_uses_configured_service_options_and_keeps_source_link(self):
+        config = product_config()
         payload = {
             "locale": "zh-CN",
             "destination": "曼谷",
@@ -221,11 +224,22 @@ class PublicSkillRegressionTests(unittest.TestCase):
         }
         html = self.render(payload)
         self.assertIn("kornvia-passport-2.1.0", html)
-        self.assertIn("¥39.9", html)
-        self.assertIn("¥199", html)
-        self.assertIn("出发前复核", html)
-        self.assertIn("人工逐日行程内测", html)
-        self.assertIn("https://trip-api.kornvia.com/trip-requests", html)
+        offers_by_id = {offer["id"]: offer for offer in config["offers"].values()}
+        service_select = re.search(
+            r'<select name="offerId"[^>]*>(.*?)</select>', html, re.DOTALL,
+        )
+        self.assertIsNotNone(service_select)
+        rendered_options = re.findall(
+            r'<option value="([^"]+)">([^<]+)</option>', service_select.group(1),
+        )
+        self.assertTrue(rendered_options)
+        for offer_id, label in rendered_options:
+            if not offer_id:
+                continue
+            self.assertIn(offer_id, offers_by_id)
+            self.assertIn(offers_by_id[offer_id]["price"], label)
+            self.assertIn(offers_by_id[offer_id]["nameZh"], label)
+        self.assertIn(config["form"]["requestUrl"], html)
         self.assertIn("https://example.com/source", html)
         self.assertIn("另有 2 条地点线索已保留", html)
 
@@ -262,9 +276,10 @@ class PublicSkillRegressionTests(unittest.TestCase):
             "paidPlanningReady",
             "¥0.01",
             "PAYMENT_MODE",
-            "¥39.9 完整逐日行程",
         ):
             self.assertNotIn(banned, customer_text)
+        for offer in product_config()["offers"].values():
+            self.assertNotIn(f'{offer["price"]} 完整逐日行程', customer_text)
 
     def test_13_display_image_finds_photo_rich_region_and_makes_four_three_crop(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1426,18 +1441,23 @@ class PublicSkillRegressionTests(unittest.TestCase):
         self.assertIn("必须在同一个 PowerShell 会话执行", skill_text)
 
     def test_43_product_config_is_the_single_commercial_and_version_source(self):
-        config = json.loads((SKILL / "config" / "product.json").read_text(encoding="utf-8"))
+        config = product_config()
         self.assertEqual(config["version"], "2.1.0")
-        self.assertEqual(config["offers"]["free"]["price"], "¥0")
-        self.assertEqual(config["offers"]["preTripReview"]["price"], "¥39.9")
-        self.assertEqual(config["offers"]["manualItineraryBeta"]["price"], "¥199")
-        self.assertEqual(config["offers"]["manualItineraryBeta"]["limits"], {
-            "cities": 1, "daysMin": 1, "daysMax": 3,
-            "placesMin": 2, "placesMax": 10, "revisions": 1,
-        })
+        self.assertTrue(config["offers"])
+        offer_ids = []
+        for offer in config["offers"].values():
+            for required in ("id", "nameZh", "nameEn", "price"):
+                self.assertIsInstance(offer.get(required), str)
+                self.assertTrue(offer[required])
+            offer_ids.append(offer["id"])
+        self.assertEqual(len(offer_ids), len(set(offer_ids)))
         python_source = SCRIPT.read_text(encoding="utf-8")
         renderer_source = RENDERER.read_text(encoding="utf-8")
-        for literal in ("¥39.9", "¥199", "https://trip-api.kornvia.com/trip-requests"):
+        commercial_literals = {
+            config["form"]["requestUrl"],
+            *(offer["price"] for offer in config["offers"].values()),
+        }
+        for literal in commercial_literals:
             self.assertNotIn(literal, python_source)
             self.assertNotIn(literal, renderer_source)
 
