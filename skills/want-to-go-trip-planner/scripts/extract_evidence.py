@@ -289,7 +289,7 @@ def prepare_platform_media_assets(files):
                 check=True,
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=60,
             )
             metadata = json.loads(result.stdout)
             score = round(float(metadata.get("photoScore", 0.0)), 4)
@@ -1157,7 +1157,8 @@ def load_transcript(path):
         raise ValueError("transcript file does not exist")
     if os.path.getsize(path) > MAX_HTML_BYTES:
         raise ValueError("transcript file exceeds 2 MB")
-    raw = open(path, "r", encoding="utf-8").read()
+    with open(path, "r", encoding="utf-8") as handle:
+        raw = handle.read()
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
@@ -1817,7 +1818,7 @@ def doctor_report(locale="zh-CN"):
     opencli = command_probe("opencli")
     video_ready = bool(ffmpeg["ready"] and ffprobe["ready"])
     core_ready = bool(platform_supported and python_ready and pillow["ready"] and node["ready"])
-    full_ready = bool(core_ready and ocr_ready)
+    full_ready = bool(core_ready and ocr_ready and opencli["ready"])
     status = "ready" if full_ready else "limited" if core_ready else "blocked"
 
     blocking_issues = []
@@ -1874,6 +1875,12 @@ def doctor_report(locale="zh-CN"):
             if is_windows else
             "brew install ffmpeg"
         )
+    if not opencli["ready"]:
+        feature_warnings.append(
+            "缺少 opencli：小红书、携程和公众号链接仍会原样保留，但自动读取受限；请从受信来源安装后重新运行 doctor。"
+            if not is_english else
+            "opencli is unavailable: Xiaohongshu, Ctrip, and WeChat URLs are still preserved, but automatic reading is limited. Install it from a trusted source and rerun doctor."
+        )
 
     return {
         "schemaVersion": PRODUCT_CONFIG["installDoctorMarker"],
@@ -1919,6 +1926,11 @@ def doctor_report(locale="zh-CN"):
         "privacy": {
             "uploadsOriginalScreenshot": False,
             "usesBrowserCookies": bool(opencli["ready"]),
+            "browserCookieBoundary": (
+                "opencli_may_reuse_local_read_only_browser_session_never_exported"
+                if opencli["ready"] else
+                "not_used"
+            ),
             "acceptsPrivateCollectionCredentials": False,
         },
     }

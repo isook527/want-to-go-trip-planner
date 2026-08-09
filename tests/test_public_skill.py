@@ -2094,6 +2094,250 @@ class PublicSkillRegressionTests(unittest.TestCase):
             self.assertEqual(displays[0]["derivedFromMediaId"], originals[0]["id"])
             self.assertEqual(displays[0]["displayPhotoScore"], 0.91)
 
+    def test_65_promote_inherits_unverified_ocr_name_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            library_path = base / "library.json"
+            selections_path = base / "selections.json"
+            library = W2G.empty_library()
+            library["bundles"] = [{
+                "bundleId": "ocr-batch", "destination": "曼谷", "failures": [],
+                "evidence": [{
+                    "sourceId": "shot-1", "sourceType": "screenshot", "destination": "曼谷",
+                    "name": "Sunset Rooftop Bar", "nameSource": "ocr_or_text_heuristic",
+                    "nameRequiresConfirmation": True,
+                }],
+            }]
+            W2G.save_library(library_path, library)
+            selections_path.write_text(json.dumps({"selections": [complete_business(
+                id="ocr-place", verifiedName="Sunset Rooftop Bar", sourceIds=["shot-1"],
+                nameSource="public_page", nameRequiresConfirmation=False,
+            )]}, ensure_ascii=False), encoding="utf-8")
+            with contextlib.redirect_stdout(io.StringIO()):
+                W2G.command_promote(argparse.Namespace(
+                    library=str(library_path), bundle_id="ocr-batch",
+                    selections=str(selections_path), operation_id="ocr-promote",
+                ))
+            place = json.loads(library_path.read_text(encoding="utf-8"))["places"][0]
+            self.assertTrue(place["nameRequiresConfirmation"])
+
+    def test_66_duplicate_source_ids_across_batches_map_to_correct_ledgers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            library_path = base / "library.json"
+            library = W2G.empty_library()
+            library["bundles"] = [
+                {"bundleId": "b1", "destination": "曼谷", "failures": [], "evidence": [
+                    {"sourceId": "text-1", "sourceType": "text", "destination": "曼谷"},
+                ]},
+                {"bundleId": "b2", "destination": "曼谷", "failures": [], "evidence": [
+                    {"sourceId": "text-1", "sourceType": "text", "destination": "曼谷"},
+                ]},
+            ]
+            W2G.save_library(library_path, library)
+            for bundle_id, place_id in (("b1", "p1"), ("b2", "p2")):
+                selection = base / f"{bundle_id}.json"
+                selection.write_text(json.dumps({"selections": [complete_business(
+                    id=place_id, verifiedName=place_id, address=f"{place_id} road",
+                    sourceIds=["text-1"],
+                )]}, ensure_ascii=False), encoding="utf-8")
+                with contextlib.redirect_stdout(io.StringIO()):
+                    W2G.command_promote(argparse.Namespace(
+                        library=str(library_path), bundle_id=bundle_id,
+                        selections=str(selection), operation_id=f"promote-{bundle_id}",
+                    ))
+            current = json.loads(library_path.read_text(encoding="utf-8"))
+            by_place = {item["id"]: item for item in current["places"]}
+            self.assertEqual(by_place["p1"]["sourceIds"], ["text-1"])
+            self.assertEqual(by_place["p2"]["sourceIds"], ["b2-text-1"])
+            self.assertEqual(W2G.validate_library_contract(current), [])
+
+    def test_67_promote_rejects_unknown_source_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            library_path = base / "library.json"
+            selections_path = base / "selections.json"
+            library = W2G.empty_library()
+            library["bundles"] = [{
+                "bundleId": "known", "destination": "曼谷", "failures": [],
+                "evidence": [{"sourceId": "known-1", "sourceType": "text", "destination": "曼谷"}],
+            }]
+            W2G.save_library(library_path, library)
+            selections_path.write_text(json.dumps({"selections": [complete_business(
+                sourceIds=["typo-1"],
+            )]}, ensure_ascii=False), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "不存在的来源"):
+                W2G.command_promote(argparse.Namespace(
+                    library=str(library_path), bundle_id="known",
+                    selections=str(selections_path), operation_id="bad-source",
+                ))
+
+    def test_68_out_of_order_undo_is_blocked_before_duplicate_place(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            library_path = Path(tmp) / "library.json"
+            library = W2G.empty_library()
+            library["places"] = [complete_business(
+                id="undo-place", name="Undo Place", destinationKey="bangkok",
+                destinationStatus="confirmed", sourceIds=[], mediaIds=[], sortOrder=0,
+                createdAt="2026-08-10T00:00:00Z", updatedAt="2026-08-10T00:00:00Z",
+            )]
+            W2G.save_library(library_path, library)
+            with contextlib.redirect_stdout(io.StringIO()):
+                W2G.command_delete(argparse.Namespace(
+                    library=str(library_path), place_id="undo-place", operation_id="delete-one",
+                ))
+            delete_event = next(
+                item["id"] for item in json.loads(library_path.read_text(encoding="utf-8"))["events"]
+                if item["type"] == "place.delete"
+            )
+            with contextlib.redirect_stdout(io.StringIO()):
+                W2G.command_restore(argparse.Namespace(
+                    library=str(library_path), place_id="undo-place", operation_id="restore-one",
+                ))
+            with self.assertRaisesRegex(ValueError, "latest active event"):
+                W2G.command_undo(argparse.Namespace(
+                    library=str(library_path), event_id=delete_event, operation_id="bad-undo",
+                ))
+            places = json.loads(library_path.read_text(encoding="utf-8"))["places"]
+            self.assertEqual([item["id"] for item in places], ["undo-place"])
+
+    def test_69_renderer_keeps_model_text_and_allows_sourceid_query(self):
+        html = self.render({
+            "locale": "zh-CN", "destination": "东京", "places": [complete_business(
+                name="模型玩具博物馆", verifiedName="模型玩具博物馆", signature="展出各种模型",
+                originalSourceLinks=[{
+                    "url": "https://you.ctrip.com/sight/tokyo/123.html?sourceId=45&t=1",
+                    "label": "打开原始收藏链接",
+                }],
+            )],
+        })
+        self.assertIn("模型玩具博物馆", html)
+        self.assertIn("展出各种模型", html)
+        self.assertIn("sourceId=45", html)
+
+    def test_70_migration_marks_old_standalone_review_request_legacy(self):
+        library = W2G.empty_library()
+        library["tripRequests"] = [{
+            "id": "old-review", "offerId": "pre-trip-review", "destinationKey": "bangkok",
+            "status": "submitted", "createdAt": "2026-01-01T00:00:00Z",
+        }]
+        migrated, changes = W2G.migrate_library_data(library)
+        self.assertTrue(migrated["tripRequests"][0]["legacyImported"])
+        self.assertTrue(any(item.startswith("legacy_trip_request_offer") for item in changes))
+        self.assertEqual(W2G.validate_library_contract(migrated), [])
+
+    def test_71_schema_validation_checks_nested_destination_fields(self):
+        library = W2G.empty_library()
+        library["destinations"] = [{
+            "id": "d", "key": "tokyo", "name": "Tokyo", "status": "confirmed",
+            "placeIds": [], "sourceIds": [], "placeCount": 0, "sortOrder": 0,
+            "createdAt": "2026-08-10T00:00:00Z", "updatedAt": "2026-08-10T00:00:00Z",
+            "unexpected": True,
+        }]
+        issues = W2G.validate_library_contract(library)
+        self.assertIn("schema_additional_property:$.destinations[0].unexpected", issues)
+
+    def test_72_destination_alias_merges_confirmed_collections(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            library_path = Path(tmp) / "library.json"
+            library = W2G.empty_library()
+            library["places"] = [
+                complete_business(id="tokyo-en", name="A", verifiedName="A", destination="Tokyo",
+                                  destinationKey="tokyo", destinationStatus="confirmed", sourceIds=[], mediaIds=[],
+                                  sortOrder=0, createdAt="2026-08-10T00:00:00Z", updatedAt="2026-08-10T00:00:00Z"),
+                complete_business(id="tokyo-zh", name="B", verifiedName="B", destination="东京",
+                                  destinationKey="东京", destinationStatus="confirmed", sourceIds=[], mediaIds=[],
+                                  sortOrder=1, createdAt="2026-08-10T00:00:00Z", updatedAt="2026-08-10T00:00:00Z"),
+            ]
+            W2G.save_library(library_path, library)
+            with contextlib.redirect_stdout(io.StringIO()):
+                W2G.command_destination_alias(argparse.Namespace(
+                    library=str(library_path), destination="Tokyo", alias="东京",
+                    operation_id="alias-tokyo",
+                ))
+            current = json.loads(library_path.read_text(encoding="utf-8"))
+            self.assertEqual({item["destinationKey"] for item in current["places"]}, {"tokyo"})
+            destination = next(item for item in current["destinations"] if item["key"] == "tokyo")
+            self.assertIn("东京", destination["aliases"])
+
+    def test_73_edit_cannot_override_name_trust_or_break_waypoints_type(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bad_trust = Path(tmp) / "trust.json"
+            bad_type = Path(tmp) / "type.json"
+            bad_trust.write_text(json.dumps({"nameRequiresConfirmation": False}), encoding="utf-8")
+            bad_type.write_text(json.dumps({"waypoints": "not-an-array"}), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "non-editable"):
+                W2G.read_patch(str(bad_trust))
+            with self.assertRaisesRegex(ValueError, "array of strings"):
+                W2G.read_patch(str(bad_type))
+
+    def test_74_windows_doctor_locale_is_forwarded(self):
+        script = (SKILL / "scripts" / "doctor_windows.ps1").read_text(encoding="ascii")
+        self.assertIn('[string]$Locale = "zh-CN"', script)
+        self.assertIn('"--locale", $Locale', script)
+
+    def test_75_repair_merges_duplicate_places_and_removes_dangling_sources(self):
+        library = W2G.empty_library()
+        older = complete_business(
+            id="duplicate", name="Old", verifiedName="Old", sourceIds=["missing", "kept"],
+            mediaIds=[], destinationKey="bangkok", destinationStatus="confirmed", sortOrder=0,
+            createdAt="2026-08-09T00:00:00Z", updatedAt="2026-08-09T00:00:00Z",
+        )
+        newer = complete_business(
+            id="duplicate", name="New", verifiedName="New", sourceIds=["kept"],
+            mediaIds=[], destinationKey="bangkok", destinationStatus="confirmed", sortOrder=0,
+            createdAt="2026-08-09T00:00:00Z", updatedAt="2026-08-10T00:00:00Z",
+        )
+        library["places"] = [older, newer]
+        library["sources"] = [{
+            "id": "kept", "ledgerVersion": 1, "batchId": "legacy", "group": "default",
+            "type": "text", "status": "captured", "destinationKey": "bangkok",
+            "submittedAt": "2026-08-09T00:00:00Z", "sourcePolicy": {
+                "version": W2G.SOURCE_POLICY_VERSION, "accessLevel": "submitted",
+                "canSupport": [], "cannotProve": [], "untrustedInstructionsDetected": False,
+            }, "mediaIds": [],
+        }]
+        fixes, blockers = W2G.repair_library(library)
+        self.assertEqual(blockers, [])
+        self.assertEqual(len(library["places"]), 1)
+        self.assertEqual(library["places"][0]["verifiedName"], "New")
+        self.assertEqual(library["places"][0]["sourceIds"], ["kept"])
+        self.assertIn("merged_duplicate_place:duplicate", fixes)
+        self.assertIn("removed_dangling_place_sources", fixes)
+
+    def test_76_confirm_requires_traceable_or_explicit_human_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            library_path = base / "library.json"
+            candidate_path = base / "candidate.json"
+            library = W2G.empty_library()
+            library["places"] = [complete_business(
+                id="needs-confirm", name="OCR Name", verifiedName="OCR Name",
+                nameSource="material_ocr", nameRequiresConfirmation=True,
+                sourceIds=[], mediaIds=[], destinationKey="bangkok",
+                destinationStatus="confirmed", sortOrder=0,
+                createdAt="2026-08-10T00:00:00Z", updatedAt="2026-08-10T00:00:00Z",
+            )]
+            W2G.save_library(library_path, library)
+            candidate_path.write_text(json.dumps({"verifiedName": "Confirmed Name"}), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "confirmation requires"):
+                W2G.command_confirm(argparse.Namespace(
+                    library=str(library_path), place_id="needs-confirm",
+                    candidate_file=str(candidate_path), operation_id="confirm-missing",
+                ))
+            candidate_path.write_text(json.dumps({
+                "verifiedName": "Confirmed Name", "candidateSource": "user_confirmation",
+            }), encoding="utf-8")
+            with contextlib.redirect_stdout(io.StringIO()):
+                W2G.command_confirm(argparse.Namespace(
+                    library=str(library_path), place_id="needs-confirm",
+                    candidate_file=str(candidate_path), operation_id="confirm-user",
+                ))
+            place = json.loads(library_path.read_text(encoding="utf-8"))["places"][0]
+            self.assertEqual(place["verifiedName"], "Confirmed Name")
+            self.assertEqual(place["nameSource"], "user_named")
+            self.assertFalse(place["nameRequiresConfirmation"])
+
 
 if __name__ == "__main__":
     unittest.main()

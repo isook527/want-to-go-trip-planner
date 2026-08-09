@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import copy
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -23,6 +24,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator, Optional, Union
+from urllib.parse import urlsplit
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "product.json"
 CONTRACT_PATH = Path(__file__).resolve().parent.parent / "references" / "shared-data-contract-v2.schema.json"
@@ -67,6 +69,15 @@ DESTINATION_LABELS_ZH = {
     "bangkok": "曼谷",
     PENDING_DESTINATION_KEY: "待确认目的地",
 }
+NAME_SOURCE_ALIASES = {
+    "user": "user_named",
+    "structured_data": "public_page",
+    "page_title": "public_page",
+    "ocr_or_text_heuristic": "material_ocr",
+}
+NAME_SOURCE_VALUES = {
+    "user_named", "public_page", "material_ocr", "visual_review", "unresolved",
+}
 BUSINESS_HOURS_FALLBACK_ZH = "营业时间请以出发当天商户公开信息为准"
 BUSINESS_HOURS_FALLBACK_EN = "Check the merchant's public information again on the day of your visit."
 PUBLIC_SPACE_HOURS_ZH = "公共空间无统一营业时间，场内商户各自安排"
@@ -97,9 +108,9 @@ EDITABLE_PLACE_FIELDS = {
     "branch", "branchName", "address", "addressText", "positionText", "openingHoursText",
     "openingHours", "signature", "reason", "whyGo", "highlight", "visitTip", "reminder",
     "departureReminder", "departureTip", "routeStart", "routeEnd", "waypoints",
-    "suggestedDuration", "durationText", "destination", "nameSource",
-    "nameRequiresConfirmation", "detailLookupAudit", "displayMediaId",
+    "suggestedDuration", "durationText", "destination", "displayMediaId",
 }
+CONFIRM_EVIDENCE_FIELDS = {"candidateSource", "providerPlaceId", "sourceUrl"}
 UNDOABLE_EVENT_TYPES = {"place.update", "place.delete", "place.restore", "place.reorder"}
 SECRET_PATTERN = re.compile(
     r"(?:-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|"
@@ -112,9 +123,14 @@ CUSTOMER_INTERNAL_PATTERN = re.compile(
     r"(?:\.workbuddy|\.claude|/Users/|/mnt/|localhost|127\.0\.0\.1|"
     r"sourceIds?|mediaIds?|confidenceScore|detailLookupAudit|nameSource|hostChecks|"
     r"platformAccess|platformItemId|platformEngagement|failureCode|"
-    r"schemaVersion|operationId|tombstones?|promptInjection|OCR|模型|宿主诊断)",
+    r"schemaVersion|operationId|tombstones?|promptInjection|宿主诊断)",
     re.IGNORECASE,
 )
+
+
+def normalized_name_source(value: Any) -> str:
+    candidate = NAME_SOURCE_ALIASES.get(text(value), text(value))
+    return candidate if candidate in NAME_SOURCE_VALUES else "unresolved"
 
 
 def now_iso() -> str:
@@ -260,20 +276,17 @@ def migrate_library_data(raw: dict[str, Any]) -> tuple[dict[str, Any], list[str]
         if not isinstance(place, dict):
             continue
         place.setdefault("id", f"place-{uuid.uuid4().hex[:12]}")
+        place.setdefault(
+            "name",
+            text(place.get("verifiedName") or place.get("displayName") or place.get("localName")),
+        )
         place.setdefault("sourceIds", [])
         place.setdefault("mediaIds", [])
         place.setdefault("sortOrder", index)
         place.setdefault("createdAt", now_iso())
         place.setdefault("updatedAt", place["createdAt"])
-        source_name = text(place.get("nameSource"))
-        name_aliases = {
-            "user": "user_named",
-            "structured_data": "public_page",
-            "page_title": "public_page",
-            "ocr_or_text_heuristic": "material_ocr",
-        }
-        if source_name in name_aliases:
-            place["nameSource"] = name_aliases[source_name]
+        if "nameSource" in place:
+            place["nameSource"] = normalized_name_source(place.get("nameSource"))
     for snapshot in data["verificationSnapshots"]:
         if not isinstance(snapshot, dict):
             continue
@@ -290,6 +303,9 @@ def migrate_library_data(raw: dict[str, Any]) -> tuple[dict[str, Any], list[str]
         if not isinstance(request, dict):
             continue
         request.setdefault("updatedAt", text(request.get("createdAt")) or now_iso())
+        if text(request.get("offerId")) == "pre-trip-review" and request.get("legacyImported") is not True:
+            request["legacyImported"] = True
+            changes.append(f"legacy_trip_request_offer:{text(request.get('id')) or 'unknown'}")
         old_status = text(request.get("status"))
         if old_status and old_status not in current_statuses:
             request["legacyStatus"] = old_status
@@ -377,6 +393,23 @@ def destination_key(value: Any) -> str:
     return DESTINATION_ALIASES.get(raw.casefold(), normalized_token(raw) or PENDING_DESTINATION_KEY)
 
 
+def destination_key_for_library(library: dict[str, Any], value: Any) -> str:
+    raw = text(value)
+    normalized = normalized_token(raw)
+    if not normalized:
+        return PENDING_DESTINATION_KEY
+    for destination in library.get("destinations") or []:
+        if not isinstance(destination, dict):
+            continue
+        aliases = [
+            destination.get("key"), destination.get("name"),
+            *(destination.get("aliases") or []),
+        ]
+        if any(normalized_token(alias) == normalized for alias in aliases):
+            return text(destination.get("key")) or destination_key(raw)
+    return destination_key(raw)
+
+
 def destination_label(key: str, fallback: str = "") -> str:
     return DESTINATION_LABELS_ZH.get(key) or text(fallback) or key
 
@@ -425,6 +458,9 @@ def rebuild_destinations(library: dict[str, Any]) -> None:
             }
             if text(existing.get("passportGeneratedAt")):
                 collections[key]["passportGeneratedAt"] = existing["passportGeneratedAt"]
+            aliases = merge_unique(existing.get("aliases") or [])
+            if aliases:
+                collections[key]["aliases"] = aliases
         return collections[key]
 
     for source in library.get("sources") or []:
@@ -750,6 +786,41 @@ def source_fingerprint(source: dict[str, Any]) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+def canonical_source_records(
+    bundles: list[dict[str, Any]],
+) -> Iterator[tuple[dict[str, Any], dict[str, Any], str, str]]:
+    """Yield stable ledger IDs while preserving legacy IDs that were globally unique."""
+    seen_ids: set[str] = set()
+    for bundle in bundles:
+        if not isinstance(bundle, dict):
+            continue
+        batch_id = text(bundle.get("bundleId")) or f"batch-{uuid.uuid4().hex[:12]}"
+        for index, raw in enumerate(bundle_sources(bundle)):
+            if not isinstance(raw, dict):
+                continue
+            base_id = text(raw.get("sourceId") or raw.get("id")) or f"source-{index + 1}"
+            candidate = base_id if base_id not in seen_ids else f"{batch_id}-{base_id}"
+            suffix = 2
+            while candidate in seen_ids:
+                candidate = f"{batch_id}-{base_id}-{suffix}"
+                suffix += 1
+            seen_ids.add(candidate)
+            yield bundle, raw, base_id, candidate
+
+
+def canonical_source_id_map(library: dict[str, Any], bundle_id: str) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for bundle, _raw, base_id, canonical_id in canonical_source_records(library.get("bundles") or []):
+        if text(bundle.get("bundleId")) != bundle_id:
+            continue
+        if base_id in result:
+            raise ValueError(f"bundle contains duplicate sourceId: {base_id}")
+        result[base_id] = canonical_id
+    if not result:
+        raise ValueError("bundle not found or contains no sources")
+    return result
+
+
 def rebuild_source_ledger(library: dict[str, Any]) -> None:
     bundles = [item for item in (library.get("bundles") or []) if isinstance(item, dict)]
     if not bundles:
@@ -779,62 +850,53 @@ def rebuild_source_ledger(library: dict[str, Any]) -> None:
         if isinstance(item, dict) and text(item.get("id"))
     }
     ledger: list[dict[str, Any]] = []
-    seen_ids: set[str] = set()
-    for bundle in bundles:
-        if not isinstance(bundle, dict):
-            continue
+    for bundle, raw, _base_id, source_id in canonical_source_records(bundles):
         batch_id = text(bundle.get("bundleId")) or f"batch-{uuid.uuid4().hex[:12]}"
         bundle_destination = text(bundle.get("destination"))
-        for index, raw in enumerate(bundle_sources(bundle)):
-            if not isinstance(raw, dict):
-                continue
-            base_id = text(raw.get("sourceId") or raw.get("id")) or f"source-{index + 1}"
-            source_id = base_id if base_id not in seen_ids else f"{batch_id}-{base_id}"
-            seen_ids.add(source_id)
-            failed = raw in bundle_failures(bundle) or text(raw.get("status")) == "failed"
-            source_type = text(raw.get("sourceType") or raw.get("type")).lower()
-            if source_type == "html":
-                source_type = "saved_html"
-            destination = source_destination(raw, bundle_destination)
-            entity: dict[str, Any] = {
-                "id": source_id,
-                "ledgerVersion": 1,
-                "batchId": batch_id,
-                "group": text(raw.get("collectionGroup") or raw.get("group")) or "default",
-                "type": source_type or "text",
-                "status": "failed" if failed else "captured",
-                "destinationKey": destination_key(destination),
-                "destination": destination,
-                "submittedAt": text(raw.get("extractedAt") or bundle.get("createdAt")) or now_iso(),
-                "sourcePolicy": source_policy_for(raw, failed),
-                "mediaIds": [],
-                "evidence": copy.deepcopy(raw),
-            }
-            submitted_url = customer_submitted_url(raw)
-            if submitted_url:
-                entity["submittedUrl"] = submitted_url
-            if text(raw.get("platform")):
-                entity["platform"] = text(raw.get("platform"))
-            if text(raw.get("platformItemId")):
-                entity["platformItemId"] = text(raw.get("platformItemId"))
-            if isinstance(raw.get("platformAccess"), dict):
-                entity["platformAccess"] = copy.deepcopy(raw["platformAccess"])
-            if failed:
-                entity["failureReason"] = text(raw.get("reason"))
-                if text(raw.get("failureCode")):
-                    entity["failureCode"] = text(raw.get("failureCode"))
-            old = previous.get(source_id)
-            if old:
-                old_without_version = copy.deepcopy(old)
-                new_without_version = copy.deepcopy(entity)
-                old_version = int(old_without_version.pop("ledgerVersion", 1) or 1)
-                old_without_version.pop("submittedAt", None)
-                old_without_version.pop("mediaIds", None)
-                new_without_version.pop("ledgerVersion", None)
-                new_without_version.pop("submittedAt", None)
-                new_without_version.pop("mediaIds", None)
-                entity["ledgerVersion"] = old_version + (old_without_version != new_without_version)
-            ledger.append(entity)
+        failed = raw in bundle_failures(bundle) or text(raw.get("status")) == "failed"
+        source_type = text(raw.get("sourceType") or raw.get("type")).lower()
+        if source_type == "html":
+            source_type = "saved_html"
+        destination = source_destination(raw, bundle_destination)
+        entity: dict[str, Any] = {
+            "id": source_id,
+            "ledgerVersion": 1,
+            "batchId": batch_id,
+            "group": text(raw.get("collectionGroup") or raw.get("group")) or "default",
+            "type": source_type or "text",
+            "status": "failed" if failed else "captured",
+            "destinationKey": destination_key_for_library(library, destination),
+            "destination": destination,
+            "submittedAt": text(raw.get("extractedAt") or bundle.get("createdAt")) or now_iso(),
+            "sourcePolicy": source_policy_for(raw, failed),
+            "mediaIds": [],
+            "evidence": copy.deepcopy(raw),
+        }
+        submitted_url = customer_submitted_url(raw)
+        if submitted_url:
+            entity["submittedUrl"] = submitted_url
+        if text(raw.get("platform")):
+            entity["platform"] = text(raw.get("platform"))
+        if text(raw.get("platformItemId")):
+            entity["platformItemId"] = text(raw.get("platformItemId"))
+        if isinstance(raw.get("platformAccess"), dict):
+            entity["platformAccess"] = copy.deepcopy(raw["platformAccess"])
+        if failed:
+            entity["failureReason"] = text(raw.get("reason"))
+            if text(raw.get("failureCode")):
+                entity["failureCode"] = text(raw.get("failureCode"))
+        old = previous.get(source_id)
+        if old:
+            old_without_version = copy.deepcopy(old)
+            new_without_version = copy.deepcopy(entity)
+            old_version = int(old_without_version.pop("ledgerVersion", 1) or 1)
+            old_without_version.pop("submittedAt", None)
+            old_without_version.pop("mediaIds", None)
+            new_without_version.pop("ledgerVersion", None)
+            new_without_version.pop("submittedAt", None)
+            new_without_version.pop("mediaIds", None)
+            entity["ledgerVersion"] = old_version + (old_without_version != new_without_version)
+        ledger.append(entity)
     library["sources"] = ledger
 
 
@@ -1030,7 +1092,7 @@ def command_ingest(args: argparse.Namespace) -> None:
 def command_list(args: argparse.Namespace) -> None:
     library = load_library(args.library)
     destination = text(args.destination)
-    requested_key = destination_key(destination) if destination else ""
+    requested_key = destination_key_for_library(library, destination) if destination else ""
     sources = [
         item for item in library["sources"]
         if not requested_key or text(item.get("destinationKey")) == requested_key
@@ -1049,7 +1111,7 @@ def command_list(args: argparse.Namespace) -> None:
 def command_present(args: argparse.Namespace) -> None:
     library = load_library(args.library)
     destination = text(args.destination) or ("your trip" if args.locale.startswith("en") else "旅行")
-    requested_key = destination_key(destination)
+    requested_key = destination_key_for_library(library, destination)
     sources = [
         source for source in library["sources"]
         if text(source.get("destinationKey")) == requested_key
@@ -1065,6 +1127,49 @@ def command_present(args: argparse.Namespace) -> None:
         next_step = PRODUCT_CONFIG["copy"]["savedNextStepZh"].replace("{destination}", destination)
         message = f"已收进你的{destination}想去库：{received}项。{failed_note}这次只做收纳，没有生成护照。{next_step}"
     print(message)
+
+
+def command_destination_alias(args: argparse.Namespace) -> None:
+    alias = text(args.alias)
+    if not alias:
+        raise ValueError("destination alias cannot be empty")
+    operation_id = get_operation_id(
+        args, f"destination-alias:{normalized_token(args.destination)}:{normalized_token(alias)}",
+    )
+    with library_transaction(args.library) as library:
+        if find_event_by_operation(library, operation_id):
+            print(json.dumps({"status": "already_applied"}, ensure_ascii=False))
+            return
+        canonical_key = destination_key_for_library(library, args.destination)
+        canonical = next(
+            (item for item in library["destinations"] if text(item.get("key")) == canonical_key),
+            None,
+        )
+        if not canonical:
+            raise ValueError("canonical destination not found; ingest it before registering aliases")
+        alias_key = destination_key_for_library(library, alias)
+        merged = next(
+            (
+                item for item in library["destinations"]
+                if text(item.get("key")) == alias_key and alias_key != canonical_key
+            ),
+            None,
+        )
+        alias_values = [alias]
+        if merged:
+            alias_values.extend([merged.get("name"), *(merged.get("aliases") or [])])
+            for place in library["places"]:
+                if text(place.get("destinationKey")) == alias_key:
+                    place["destinationKey"] = canonical_key
+                    place["destination"] = text(canonical.get("name")) or text(args.destination)
+                    place["updatedAt"] = now_iso()
+        canonical["aliases"] = merge_unique([*(canonical.get("aliases") or []), *alias_values])
+        canonical["updatedAt"] = now_iso()
+        append_event(
+            library, operation_id, "destination.alias", canonical_key,
+            after={"alias": alias, "mergedKey": alias_key if merged else ""},
+        )
+    print(json.dumps({"status": "registered", "destinationKey": canonical_key, "alias": alias}, ensure_ascii=False))
 
 
 def evidence_map(library: dict[str, Any], bundle_id: str) -> dict[str, dict[str, Any]]:
@@ -1323,6 +1428,7 @@ def command_promote(args: argparse.Namespace) -> None:
             print(json.dumps({"status": "already_applied", "placeIds": prior.get("placeIds", [])}, ensure_ascii=False))
             return
         source_by_id = evidence_map(library, args.bundle_id)
+        source_id_map = canonical_source_id_map(library, args.bundle_id)
         all_bundle_sources = evidence_list(library, args.bundle_id)
         bundle_destination = next(
             (text(item.get("destination")) for item in library["bundles"] if item.get("bundleId") == args.bundle_id),
@@ -1332,8 +1438,20 @@ def command_promote(args: argparse.Namespace) -> None:
             name = first(selection, "verifiedName", "name", "displayName")
             if not name:
                 raise ValueError("every selection needs a name")
-            source_ids = selection.get("sourceIds") or []
+            raw_source_ids = selection.get("sourceIds") or []
+            if not isinstance(raw_source_ids, list):
+                raise ValueError(f"地点“{name}”的 sourceIds 必须是数组")
+            requested_source_ids = merge_unique(raw_source_ids)
+            unknown_source_ids = [item for item in requested_source_ids if item not in source_by_id]
+            if unknown_source_ids:
+                raise ValueError(
+                    f"地点“{name}”引用了本批次不存在的来源：{', '.join(unknown_source_ids)}"
+                )
             linked_sources = sources_for_selection(selection, source_by_id, all_bundle_sources)
+            linked_raw_ids = merge_unique(
+                [text(item.get("sourceId") or item.get("id")) for item in linked_sources]
+            )
+            source_ids = [source_id_map[item] for item in linked_raw_ids if item in source_id_map]
             links = links_from_evidence(linked_sources)
             place = copy.deepcopy(selection)
             place["id"] = text(place.get("id")) or f"place-{uuid.uuid4().hex[:12]}"
@@ -1344,19 +1462,19 @@ def command_promote(args: argparse.Namespace) -> None:
                 [source_destination(source, bundle_destination) for source in linked_sources]
             )
             linked_keys = {
-                destination_key(item)
+                destination_key_for_library(library, item)
                 for item in linked_destinations
-                if destination_key(item) != PENDING_DESTINATION_KEY
+                if destination_key_for_library(library, item) != PENDING_DESTINATION_KEY
             }
             if len(linked_keys) > 1:
                 raise ValueError(f"同一地点来源包含多个目的地：{', '.join(linked_destinations)}")
-            explicit_key = destination_key(explicit_destination) if explicit_destination else ""
+            explicit_key = destination_key_for_library(library, explicit_destination) if explicit_destination else ""
             if explicit_key and linked_keys and explicit_key not in linked_keys:
                 raise ValueError(
                     f"地点“{name}”填写的目的地与来源不一致：{explicit_destination} / {', '.join(linked_destinations)}"
                 )
             selected_destination = explicit_destination or next(iter(linked_destinations), "") or bundle_destination
-            selected_key = destination_key(selected_destination)
+            selected_key = destination_key_for_library(library, selected_destination)
             place["destination"] = "" if selected_key == PENDING_DESTINATION_KEY else destination_label(selected_key, selected_destination)
             place["destinationKey"] = selected_key
             place["destinationStatus"] = "needs_confirmation" if selected_key == PENDING_DESTINATION_KEY else "confirmed"
@@ -1368,8 +1486,30 @@ def command_promote(args: argparse.Namespace) -> None:
             display_photo = display_photo_from_sources(place, linked_sources)
             if display_photo:
                 place["displayPhoto"] = display_photo
-            place.setdefault("nameSource", "user_named")
-            place.setdefault("nameRequiresConfirmation", place.get("nameSource") == "material_ocr")
+            evidence_sources = [
+                normalized_name_source(item.get("nameSource"))
+                for item in linked_sources
+                if text(item.get("nameSource"))
+            ]
+            explicit_name_source = normalized_name_source(selection.get("nameSource"))
+            if text(selection.get("nameSource")):
+                name_source = explicit_name_source
+            elif evidence_sources:
+                name_source = next(
+                    (item for item in evidence_sources if item in {"material_ocr", "unresolved"}),
+                    evidence_sources[0],
+                )
+            else:
+                name_source = "unresolved"
+            evidence_requires_confirmation = any(
+                item.get("nameRequiresConfirmation") is True for item in linked_sources
+            ) or any(item in {"material_ocr", "unresolved"} for item in evidence_sources)
+            place["nameSource"] = name_source
+            place["nameRequiresConfirmation"] = bool(
+                selection.get("nameRequiresConfirmation") is True
+                or evidence_requires_confirmation
+                or name_source in {"material_ocr", "unresolved"}
+            )
             place = upsert_place(library, place, args.bundle_id)
             promoted.append(place["id"])
         append_event(library, operation_id, "place.promote", args.bundle_id, after={"placeIds": promoted})
@@ -1378,15 +1518,15 @@ def command_promote(args: argparse.Namespace) -> None:
 
 def command_passport(args: argparse.Namespace) -> None:
     destination = text(args.destination)
-    requested_key = destination_key(destination)
     content_depth = text(getattr(args, "content_depth", "standard")) or "standard"
     if content_depth not in {"deep", "standard", "compact"}:
         raise ValueError("content depth must be deep, standard, or compact")
     visitor_mode = bool(getattr(args, "visitor_mode", False))
     delivered: list[dict[str, Any]] = []
     retained: list[dict[str, Any]] = []
-    operation_id = get_operation_id(args, f"passport:{requested_key}:{uuid.uuid4().hex[:12]}")
     with library_transaction(args.library) as library:
+        requested_key = destination_key_for_library(library, destination)
+        operation_id = get_operation_id(args, f"passport:{requested_key}:{uuid.uuid4().hex[:12]}")
         candidates = sorted(
             [
                 place for place in library["places"]
@@ -1478,6 +1618,17 @@ def read_patch(path: str) -> dict[str, Any]:
     unknown = sorted(set(patch) - EDITABLE_PLACE_FIELDS)
     if unknown:
         raise ValueError(f"patch contains non-editable fields: {', '.join(unknown)}")
+    for field, value in patch.items():
+        if field == "waypoints":
+            if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+                raise ValueError("waypoints must be an array of strings")
+        elif field == "openingHours":
+            if not isinstance(value, (str, dict)):
+                raise ValueError("openingHours must be text or an object")
+        elif not isinstance(value, str):
+            raise ValueError(f"{field} must be text")
+    if "placeType" in patch and patch["placeType"] not in {"business", "venue", "public_space", "route"}:
+        raise ValueError("placeType must be business, venue, public_space, or route")
     return patch
 
 
@@ -1500,10 +1651,14 @@ def command_edit(args: argparse.Namespace) -> None:
         place = next((item for item in library["places"] if text(item.get("id")) == args.place_id), None)
         if not place:
             raise ValueError("place not found")
+        if text(patch.get("displayMediaId")):
+            allowed_media = set(place.get("mediaIds") or [])
+            if text(patch["displayMediaId"]) not in allowed_media:
+                raise ValueError("displayMediaId must belong to this place")
         before = copy.deepcopy(place)
         place.update(copy.deepcopy(patch))
         if "destination" in patch:
-            key = destination_key(place.get("destination"))
+            key = destination_key_for_library(library, place.get("destination"))
             place["destinationKey"] = key
             place["destinationStatus"] = "needs_confirmation" if key == PENDING_DESTINATION_KEY else "confirmed"
         place["placeType"] = normalized_place_type(place)
@@ -1571,9 +1726,9 @@ def command_reorder(args: argparse.Namespace) -> None:
     ordered_ids = [text(item) for item in place_ids]
     if len(set(ordered_ids)) != len(ordered_ids):
         raise ValueError("placeIds must be unique")
-    requested_key = destination_key(args.destination)
-    operation_id = get_operation_id(args, f"reorder:{requested_key}:{uuid.uuid4().hex[:12]}")
     with library_transaction(args.library) as library:
+        requested_key = destination_key_for_library(library, args.destination)
+        operation_id = get_operation_id(args, f"reorder:{requested_key}:{uuid.uuid4().hex[:12]}")
         if find_event_by_operation(library, operation_id):
             print(json.dumps({"status": "already_applied", "destinationKey": requested_key}, ensure_ascii=False))
             return
@@ -1614,19 +1769,36 @@ def command_undo(args: argparse.Namespace) -> None:
             raise ValueError("no undoable event found")
         event_type = text(event.get("type"))
         entity_id = text(event.get("entityId"))
+        later_for_entity = next(
+            (
+                item for item in reversed(library["events"])
+                if item.get("undoable") is True
+                and not text(item.get("undoneAt"))
+                and text(item.get("entityId")) == entity_id
+            ),
+            None,
+        )
+        if later_for_entity is not event:
+            raise ValueError("undo the latest active event for this place or destination first")
         if event_type == "place.update":
             if not isinstance(event.get("before"), dict):
                 raise ValueError("undo data is missing")
+            if sum(text(item.get("id")) == entity_id for item in library["places"]) != 1:
+                raise ValueError("place is not in the expected active state")
             replace_place(library, event["before"])
         elif event_type == "place.delete":
             if not isinstance(event.get("before"), dict):
                 raise ValueError("undo data is missing")
+            if any(text(item.get("id")) == entity_id for item in library["places"]):
+                raise ValueError("place is already active; undo the later event first")
             library["places"].append(copy.deepcopy(event["before"]))
             library["tombstones"] = [
                 item for item in library["tombstones"]
                 if not (item.get("entityType") == "place" and text(item.get("entityId")) == entity_id)
             ]
         elif event_type == "place.restore":
+            if sum(text(item.get("id")) == entity_id for item in library["places"]) != 1:
+                raise ValueError("restored place is not in the expected active state")
             library["places"] = [item for item in library["places"] if text(item.get("id")) != entity_id]
             if isinstance(event.get("before"), dict):
                 library["tombstones"].append(copy.deepcopy(event["before"]))
@@ -1682,6 +1854,41 @@ def repair_library(library: dict[str, Any]) -> tuple[list[str], list[str]]:
         current = sha256_if_file(item.get("path"))
         if current and current != text(item.get("sha256")):
             blockers.append(f"original_media_hash_mismatch:{item.get('id')}")
+    grouped_places: dict[str, list[dict[str, Any]]] = {}
+    place_order: list[str] = []
+    for place in library.get("places") or []:
+        if not isinstance(place, dict):
+            continue
+        place_id = text(place.get("id"))
+        if place_id not in grouped_places:
+            place_order.append(place_id)
+        grouped_places.setdefault(place_id, []).append(place)
+    repaired_places: list[dict[str, Any]] = []
+    for place_id in place_order:
+        candidates = grouped_places[place_id]
+        winner = copy.deepcopy(max(
+            candidates,
+            key=lambda item: (text(item.get("updatedAt")), text(item.get("createdAt"))),
+        ))
+        if len(candidates) > 1:
+            for candidate in candidates:
+                for key, value in candidate.items():
+                    if key not in winner or winner.get(key) in (None, "", []):
+                        winner[key] = copy.deepcopy(value)
+                for key in ("sourceIds", "mediaIds", "bundleIds"):
+                    winner[key] = merge_unique([
+                        *(winner.get(key) or []), *(candidate.get(key) or []),
+                    ])
+                winner["originalSourceLinks"] = source_links({
+                    "originalSourceLinks": [
+                        *(winner.get("originalSourceLinks") or []),
+                        *(candidate.get("originalSourceLinks") or []),
+                    ]
+                })
+            fixes.append(f"merged_duplicate_place:{place_id}")
+        repaired_places.append(winner)
+    library["places"] = repaired_places
+
     before_destinations = json.dumps(library.get("destinations") or [], ensure_ascii=False, sort_keys=True)
     before_sources = json.dumps(library.get("sources") or [], ensure_ascii=False, sort_keys=True)
     rebuild_source_ledger(library)
@@ -1691,34 +1898,136 @@ def repair_library(library: dict[str, Any]) -> tuple[list[str], list[str]]:
         fixes.append("rebuilt_source_and_media_ledgers")
     if before_destinations != json.dumps(library.get("destinations") or [], ensure_ascii=False, sort_keys=True):
         fixes.append("rebuilt_destination_index")
-    active_ids = {text(item.get("id")) for item in library.get("places") or []}
-    duplicate_ids = sorted({item for item in active_ids if sum(text(place.get("id")) == item for place in library["places"]) > 1})
-    blockers.extend(f"duplicate_place_id:{item}" for item in duplicate_ids)
+    source_ids = {text(item.get("id")) for item in library.get("sources") or []}
+    dangling_removed = False
+    for place in library.get("places") or []:
+        current = merge_unique(place.get("sourceIds") or [])
+        repaired = [item for item in current if item in source_ids]
+        if repaired != current:
+            place["sourceIds"] = repaired
+            dangling_removed = True
+    if dangling_removed:
+        rebuild_media_ledger(library)
+        rebuild_destinations(library)
+        fixes.append("removed_dangling_place_sources")
     return fixes, blockers
 
 
-def command_repair(args: argparse.Namespace) -> None:
+def command_repair(args: argparse.Namespace) -> int:
     if args.dry_run:
         library = load_library(args.library)
         fixes, blockers = repair_library(library)
     else:
-        with library_transaction(args.library) as library:
+        with file_lock(args.library):
+            library = load_library(args.library)
             fixes, blockers = repair_library(library)
-            if blockers:
-                raise ValueError("repair blocked: " + ", ".join(blockers))
-            append_event(
-                library,
-                get_operation_id(args, f"repair:{uuid.uuid4().hex[:12]}"),
-                "library.repair",
-                text(library.get("id")),
-                after={"fixes": fixes},
-            )
+            if not blockers:
+                append_event(
+                    library,
+                    get_operation_id(args, f"repair:{uuid.uuid4().hex[:12]}"),
+                    "library.repair",
+                    text(library.get("id")),
+                    after={"fixes": fixes},
+                )
+                _save_library_unlocked(args.library, library)
     print(json.dumps({"status": "blocked" if blockers else "ready", "dryRun": bool(args.dry_run), "fixes": fixes, "blockers": blockers}, ensure_ascii=False))
+    return 1 if blockers else 0
+
+
+def json_schema_issues(
+    value: Any,
+    schema: dict[str, Any],
+    root: dict[str, Any],
+    path: str = "$",
+) -> list[str]:
+    """Validate the contract subset used by the bundled draft-2020-12 schema."""
+    if "$ref" in schema:
+        reference = text(schema["$ref"])
+        if not reference.startswith("#/"):
+            return [f"schema_external_ref:{path}"]
+        resolved: Any = root
+        for token in reference[2:].split("/"):
+            resolved = resolved.get(token.replace("~1", "/").replace("~0", "~")) if isinstance(resolved, dict) else None
+        if not isinstance(resolved, dict):
+            return [f"schema_missing_ref:{path}:{reference}"]
+        return json_schema_issues(value, resolved, root, path)
+
+    issues: list[str] = []
+    for child in schema.get("allOf") or []:
+        if isinstance(child, dict):
+            issues.extend(json_schema_issues(value, child, root, path))
+    condition = schema.get("if")
+    if isinstance(condition, dict) and not json_schema_issues(value, condition, root, path):
+        consequence = schema.get("then")
+        if isinstance(consequence, dict):
+            issues.extend(json_schema_issues(value, consequence, root, path))
+    prohibited = schema.get("not")
+    if isinstance(prohibited, dict) and not json_schema_issues(value, prohibited, root, path):
+        issues.append(f"schema_not:{path}")
+
+    expected_type = schema.get("type")
+    type_ok = {
+        "object": isinstance(value, dict),
+        "array": isinstance(value, list),
+        "string": isinstance(value, str),
+        "integer": isinstance(value, int) and not isinstance(value, bool),
+        "number": isinstance(value, (int, float)) and not isinstance(value, bool),
+        "boolean": isinstance(value, bool),
+        "null": value is None,
+    }.get(expected_type, True)
+    if expected_type and not type_ok:
+        return [*issues, f"schema_type:{path}:{expected_type}"]
+    if "const" in schema and value != schema["const"]:
+        issues.append(f"schema_const:{path}")
+    if "enum" in schema and value not in schema["enum"]:
+        issues.append(f"schema_enum:{path}")
+
+    if isinstance(value, str):
+        if len(value) < int(schema.get("minLength", 0) or 0):
+            issues.append(f"schema_min_length:{path}")
+        if schema.get("maxLength") is not None and len(value) > int(schema["maxLength"]):
+            issues.append(f"schema_max_length:{path}")
+        if text(schema.get("pattern")) and not re.search(text(schema["pattern"]), value):
+            issues.append(f"schema_pattern:{path}")
+        if schema.get("format") == "date" and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+            issues.append(f"schema_date:{path}")
+        if schema.get("format") == "date-time":
+            try:
+                datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                issues.append(f"schema_datetime:{path}")
+        if schema.get("format") == "uri" and not re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", value):
+            issues.append(f"schema_uri:{path}")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if schema.get("minimum") is not None and value < schema["minimum"]:
+            issues.append(f"schema_minimum:{path}")
+    if isinstance(value, list):
+        if schema.get("uniqueItems") is True:
+            encoded = [json.dumps(item, ensure_ascii=False, sort_keys=True) for item in value]
+            if len(encoded) != len(set(encoded)):
+                issues.append(f"schema_unique_items:{path}")
+        item_schema = schema.get("items")
+        if isinstance(item_schema, dict):
+            for index, item in enumerate(value):
+                issues.extend(json_schema_issues(item, item_schema, root, f"{path}[{index}]"))
+    if isinstance(value, dict):
+        required = schema.get("required") or []
+        for key in required:
+            if key not in value:
+                issues.append(f"schema_required:{path}.{key}")
+        properties = schema.get("properties") or {}
+        for key, child_value in value.items():
+            child_schema = properties.get(key)
+            if isinstance(child_schema, dict):
+                issues.extend(json_schema_issues(child_value, child_schema, root, f"{path}.{key}"))
+            elif schema.get("additionalProperties") is False:
+                issues.append(f"schema_additional_property:{path}.{key}")
+    return issues
 
 
 def validate_library_contract(library: dict[str, Any]) -> list[str]:
     schema = read_json(CONTRACT_PATH)
-    issues: list[str] = []
+    issues: list[str] = json_schema_issues(library, schema, schema)
     required = set(schema.get("required") or [])
     allowed = set((schema.get("properties") or {}).keys())
     missing = sorted(required - set(library))
@@ -1877,7 +2186,7 @@ def command_review(args: argparse.Namespace) -> None:
     items = raw.get("items")
     if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
         raise ValueError("checks must contain an items array")
-    requested_key = destination_key(args.destination)
+    requested_key = destination_key_for_library(load_library(args.library), args.destination)
     for item in items:
         if not text(item.get("placeId")):
             raise ValueError("every review item needs placeId")
@@ -1952,7 +2261,9 @@ def command_trip_request(args: argparse.Namespace) -> None:
         raise ValueError("standalone pre-trip review is not a public request option")
     place_ids = merge_unique(request.get("placeIds") or [])
     destination = text(request.get("destination"))
-    destination_key_value = text(request.get("destinationKey")) or destination_key(destination)
+    destination_key_value = text(request.get("destinationKey")) or destination_key_for_library(
+        load_library(args.library), destination,
+    )
     limits = PRODUCT_CONFIG["offers"]["manualItineraryBeta"]["limits"]
     days = int(request.get("days", 0) or 0)
     if not limits["daysMin"] <= days <= limits["daysMax"]:
@@ -2039,6 +2350,44 @@ def iter_text_payloads(path: Path) -> Iterator[tuple[str, str]]:
         yield str(path), path.read_text(encoding="utf-8", errors="replace")
 
 
+def customer_url_issues(content: str) -> list[str]:
+    issues: list[str] = []
+    attributes = re.findall(r"\b(?:href|src|action)\s*=\s*['\"]([^'\"]+)['\"]", content, re.I)
+    for value in attributes:
+        if re.match(r"^data:image/(?:png|jpeg|webp);base64,", value, re.I):
+            continue
+        parsed = urlsplit(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            issues.append("unsafe_url_protocol")
+            continue
+        hostname = parsed.hostname.casefold()
+        if hostname == "localhost":
+            issues.append("unsafe_url_host")
+            continue
+        try:
+            address = ipaddress.ip_address(hostname)
+        except ValueError:
+            address = None
+        if address and not address.is_global:
+            issues.append("unsafe_url_host")
+    return sorted(set(issues))
+
+
+def customer_text_for_scan(content: str) -> str:
+    without_images = re.sub(
+        r"data:image/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+",
+        "[embedded-image]",
+        content,
+    )
+    without_attributes = re.sub(
+        r"\b(href|src|action)\s*=\s*(['\"])[^'\"]*\2",
+        lambda match: f'{match.group(1)}="[customer-url]"',
+        without_images,
+        flags=re.I,
+    )
+    return re.sub(r"https?://[^\s\"'<>]+", "[customer-url]", without_attributes, flags=re.I)
+
+
 def command_scan(args: argparse.Namespace) -> None:
     target = Path(args.path)
     if not target.exists():
@@ -2056,15 +2405,19 @@ def command_scan(args: argparse.Namespace) -> None:
                 if bad_name_pattern.search(name):
                     issues.append({"file": name, "type": "forbidden_artifact"})
     for name, content in iter_text_payloads(target):
-        scan_content = re.sub(
+        secret_scan_content = re.sub(
             r"data:image/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+",
             "[embedded-image]",
             content,
         )
-        if SECRET_PATTERN.search(scan_content):
+        scan_content = customer_text_for_scan(content)
+        if SECRET_PATTERN.search(secret_scan_content):
             issues.append({"file": name, "type": "possible_secret"})
-        if args.mode == "customer" and CUSTOMER_INTERNAL_PATTERN.search(scan_content):
-            issues.append({"file": name, "type": "customer_internal_leak"})
+        if args.mode == "customer":
+            if CUSTOMER_INTERNAL_PATTERN.search(scan_content):
+                issues.append({"file": name, "type": "customer_internal_leak"})
+            for issue in customer_url_issues(content):
+                issues.append({"file": name, "type": issue})
     if issues:
         raise ValueError("scan failed: " + json.dumps(issues, ensure_ascii=False))
     print(json.dumps({"status": "clean", "mode": args.mode, "path": str(target)}, ensure_ascii=False))
@@ -2084,9 +2437,31 @@ def command_confirm(args: argparse.Namespace) -> None:
     candidate = read_json(args.candidate_file)
     if not isinstance(candidate, dict):
         raise ValueError("candidate must be an object")
-    forbidden = sorted(set(candidate) - EDITABLE_PLACE_FIELDS)
+    forbidden = sorted(set(candidate) - EDITABLE_PLACE_FIELDS - CONFIRM_EVIDENCE_FIELDS)
     if forbidden:
         raise ValueError(f"candidate contains non-editable fields: {', '.join(forbidden)}")
+    source_url = text(candidate.get("sourceUrl"))
+    candidate_source = text(candidate.get("candidateSource"))
+    provider_place_id = text(candidate.get("providerPlaceId"))
+    has_evidence = bool(
+        provider_place_id
+        or re.match(r"^https?://", source_url, re.I)
+        or candidate_source in {"user_confirmation", "public_page", "visual_review"}
+    )
+    if not has_evidence:
+        raise ValueError("confirmation requires a public URL, provider place ID, or explicit user/visual confirmation")
+    update = {key: copy.deepcopy(value) for key, value in candidate.items() if key in EDITABLE_PLACE_FIELDS}
+    if not update:
+        raise ValueError("confirmation candidate contains no place fields")
+    for field, value in update.items():
+        if field == "waypoints":
+            if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+                raise ValueError("waypoints must be an array of strings")
+        elif field == "openingHours":
+            if not isinstance(value, (str, dict)):
+                raise ValueError("openingHours must be text or an object")
+        elif not isinstance(value, str):
+            raise ValueError(f"{field} must be text")
     operation_id = get_operation_id(args, f"confirm:{args.place_id}:{uuid.uuid4().hex[:12]}")
     with library_transaction(args.library) as library:
         if find_event_by_operation(library, operation_id):
@@ -2096,12 +2471,27 @@ def command_confirm(args: argparse.Namespace) -> None:
         if not place:
             raise ValueError("place not found")
         before = copy.deepcopy(place)
-        place.update(candidate)
+        place.update(update)
         place["nameRequiresConfirmation"] = False
-        place.setdefault("nameSource", "user_named")
+        if candidate_source == "visual_review":
+            place["nameSource"] = "visual_review"
+        elif candidate_source == "user_confirmation":
+            place["nameSource"] = "user_named"
+        else:
+            place["nameSource"] = "public_page"
         place["identityKey"] = place_identity_key(place)
         place["updatedAt"] = now_iso()
-        append_event(library, operation_id, "place.update", args.place_id, before, place, True)
+        append_event(
+            library, operation_id, "place.update", args.place_id, before, place, True,
+        )
+        library["events"][-1]["after"] = {
+            **copy.deepcopy(place),
+            "confirmationEvidence": {
+                **({"candidateSource": candidate_source} if candidate_source else {}),
+                **({"providerPlaceId": provider_place_id} if provider_place_id else {}),
+                **({"sourceUrl": source_url} if source_url else {}),
+            },
+        }
     print(json.dumps({"status": "confirmed", "placeId": args.place_id}, ensure_ascii=False))
 
 
@@ -2158,6 +2548,13 @@ def build_parser() -> argparse.ArgumentParser:
     present.add_argument("--destination", required=True)
     present.add_argument("--locale", default="zh-CN")
     present.set_defaults(func=command_present)
+
+    destination_alias = sub.add_parser("destination-alias")
+    destination_alias.add_argument("--library", required=True)
+    destination_alias.add_argument("--destination", required=True)
+    destination_alias.add_argument("--alias", required=True)
+    destination_alias.add_argument("--operation-id", default="")
+    destination_alias.set_defaults(func=command_destination_alias)
 
     promote = sub.add_parser("promote")
     promote.add_argument("--library", required=True)
@@ -2273,8 +2670,8 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
     try:
-        args.func(args)
-        return 0
+        result = args.func(args)
+        return int(result or 0)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(json.dumps({"code": "ERROR", "message": str(exc)}, ensure_ascii=False), file=sys.stderr)
         return 1

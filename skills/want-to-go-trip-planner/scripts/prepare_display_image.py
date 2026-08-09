@@ -71,12 +71,14 @@ def photographic_score(image) -> float:
     saturation = min(1.0, ImageStat.Stat(saturation_channel).mean[0] / 96.0)
     edge_image = gray.filter(ImageFilter.FIND_EDGES)
     edge_strength = min(1.0, ImageStat.Stat(edge_image).mean[0] / 48.0)
-    rgb_pixels = list(sample.getdata())
+    rgb_reader = getattr(sample, "get_flattened_data", sample.getdata)
+    rgb_pixels = list(rgb_reader())
     neutral_share = sum(max(pixel) - min(pixel) < 12 for pixel in rgb_pixels) / pixel_count
     black_or_white_share = sum(
         max(pixel) < 45 or min(pixel) > 225 for pixel in rgb_pixels
     ) / pixel_count
-    edge_pixels = list(edge_image.getdata())
+    edge_reader = getattr(edge_image, "get_flattened_data", edge_image.getdata)
+    edge_pixels = list(edge_reader())
     row_means = [
         sum(edge_pixels[offset:offset + sample.width]) / sample.width
         for offset in range(0, len(edge_pixels), sample.width)
@@ -137,7 +139,8 @@ def prepare_display_image(
     except ImportError as exc:
         raise SystemExit("Pillow is required for deterministic display-image cropping") from exc
 
-    source = Image.open(input_path).convert("RGB")
+    with Image.open(input_path) as opened:
+        source = opened.convert("RGB")
     width, height = source.size
     box, score = best_crop(source, aspect)
     cropped = source.crop(box)

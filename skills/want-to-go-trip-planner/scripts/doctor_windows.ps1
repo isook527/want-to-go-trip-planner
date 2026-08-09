@@ -1,3 +1,8 @@
+param(
+    [ValidateSet("zh-CN", "en-US")]
+    [string]$Locale = "zh-CN"
+)
+
 $ErrorActionPreference = "Stop"
 $utf8 = New-Object System.Text.UTF8Encoding($false)
 [Console]::InputEncoding = $utf8
@@ -68,6 +73,6 @@ if ($null -eq $pythonName) {
 $doctorPath = Join-Path $PSScriptRoot "extract_evidence.py"
 $arguments = @()
 $arguments += $pythonPrefix
-$arguments += @($doctorPath, "doctor", "--locale", "zh-CN")
+$arguments += @($doctorPath, "doctor", "--locale", $Locale)
 & $pythonName @arguments
 exit $LASTEXITCODE

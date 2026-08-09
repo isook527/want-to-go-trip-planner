@@ -7,6 +7,8 @@
 - Windows 完整 OCR 需要 Tesseract、`eng` 和 `chi_sim`/`chi_tra` 至少一个。
 - macOS 优先 Vision OCR，可降级到 Tesseract。
 - FFmpeg/FFprobe 只影响视频自动拆帧；缺失时收关键截图。
+- `opencli` 是小红书、携程和公众号自动读取的本地适配依赖；本版已验证 1.8.6。缺失时 doctor 必须标记这些平台能力受限，原 URL 仍照常保留。
+- `opencli` 可能复用本机已有浏览器的只读会话状态；Skill 不代用户登录、不导出或上传 Cookie，遇验证码、登录或安全检查立即停止并保留原始链接。不要从不明来源安装或替换该二进制。
 - PowerShell 5.1 脚本源保持 ASCII-safe，运行时从 UTF-8 配置读取版本；会话设置 `PYTHONUTF8=1` 与 `PYTHONIOENCODING=utf-8`。
 
 本地 macOS 测试和 PowerShell 静态检查不能替代真实 Windows runner。没有远程上传授权时，明确把真实 Windows 复验列为阻塞项。

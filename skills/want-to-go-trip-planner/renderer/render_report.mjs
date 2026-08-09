@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from "node:fs";
+import net from "node:net";
 import path from "node:path";
 import {
   escapeHtml,
@@ -18,19 +19,52 @@ const FORM_COPY = PRODUCT_CONFIG.form.copy;
 const FREE_OFFER = PRODUCT_CONFIG.offers.free;
 const MANUAL_OFFER = PRODUCT_CONFIG.offers.manualItineraryBeta;
 const INTERNAL_PATTERN =
-  /(?:\.workbuddy|\.claude|\/Users\/|\/mnt\/|localhost|127\.0\.0\.1|sourceRefs?|sourceIds?|mediaIds?|confidenceScore|detailLookupAudit|nameSource|hostChecks|platformAccess|platformItemId|platformEngagement|failureCode|paidPlanningReady|OCR|模型|宿主诊断|schemaVersion|paymentCode|operationId|tombstones?)/i;
+  /(?:\.workbuddy|\.claude|\/Users\/|\/mnt\/|localhost|127\.0\.0\.1|sourceRefs?|sourceIds?|mediaIds?|confidenceScore|detailLookupAudit|nameSource|hostChecks|platformAccess|platformItemId|platformEngagement|failureCode|paidPlanningReady|宿主诊断|schemaVersion|paymentCode|operationId|tombstones?)/i;
+const CONTENT_LEAK_PATTERN = /(?:\.workbuddy|\.claude|\/Users\/|\/mnt\/|localhost|127\.0\.0\.1|宿主诊断)/i;
 const SECRET_PATTERN = /(?:-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\b(?:sk|rk|pk)_[A-Za-z0-9]{20,}\b|\bBearer\s+[A-Za-z0-9._~+/=-]{16,})/i;
 
-function customerTextForScan(html) {
+function contentForSecretScan(html) {
   return html
     .replace(/data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+/g, "[embedded-image]")
     .replace(/<!--.*?-->/gs, "");
 }
 
-function clean(value, max = 260) {
+function customerTextForScan(html) {
+  return contentForSecretScan(html)
+    .replace(/\b(?:href|src|action)="[^"]*"/gi, (attribute) => `${attribute.split("=")[0]}="[customer-url]"`);
+}
+
+function clean(value, max = 260, field = "content") {
   const text = String(value ?? "").replace(/\s+/g, " ").trim();
-  if (!text || INTERNAL_PATTERN.test(text)) return "";
+  if (!text) return "";
+  if (CONTENT_LEAK_PATTERN.test(text)) {
+    process.stderr.write(`suppressed unsafe ${field}\n`);
+    return "";
+  }
   return text.slice(0, max);
+}
+
+function assertSafeUrlAttributes(html) {
+  for (const match of html.matchAll(/\b(href|src|action)="([^"]*)"/gi)) {
+    const [raw, attribute, value] = match;
+    if (attribute.toLowerCase() === "src" && /^data:image\/(?:png|jpeg|webp);base64,/i.test(value)) continue;
+    let parsed;
+    try {
+      parsed = new URL(value);
+    } catch {
+      throw new Error(`unsafe customer URL attribute: ${raw.slice(0, 80)}`);
+    }
+    if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("unsafe customer URL protocol");
+    const host = parsed.hostname.toLowerCase();
+    if (host === "localhost" || host === "127.0.0.1" || host === "::1") {
+      throw new Error("unsafe customer URL host");
+    }
+    if (net.isIP(host)) {
+      const privateIpv4 = /^(?:0\.|10\.|127\.|169\.254\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(host);
+      const privateIpv6 = /^(?:::|fc|fd|fe8|fe9|fea|feb)/i.test(host);
+      if (privateIpv4 || privateIpv6) throw new Error("unsafe customer URL host");
+    }
+  }
 }
 
 function dataUrlFromPath(file, baseDir) {
@@ -109,7 +143,7 @@ function requestCard(report, locale, placeCount) {
         </article>
       </div>
     </div>
-    <form class="request-form" action="${CTA_URL}" method="post" target="_blank" rel="noopener noreferrer" accept-charset="UTF-8" referrerpolicy="no-referrer">
+    <form class="request-form" action="${CTA_URL}" method="post" target="_blank" rel="noopener noreferrer" accept-charset="UTF-8">
       <input type="hidden" name="locale" value="${locale}">
       <input type="hidden" name="placeCount" value="${placeCount}">
       <input type="hidden" name="offerId" value="${escapeHtml(PRODUCT_CONFIG.form.publicOfferId)}">
@@ -203,8 +237,9 @@ function main() {
   const report = JSON.parse(fs.readFileSync(inputPath, "utf8"));
   if (!Array.isArray(report.places) || report.places.length === 0) throw new Error("no deliverable places");
   const html = render(report, inputPath);
+  assertSafeUrlAttributes(html);
   if (INTERNAL_PATTERN.test(customerTextForScan(html))) throw new Error("customer output contains internal text");
-  if (SECRET_PATTERN.test(customerTextForScan(html))) throw new Error("customer output contains secret-like text");
+  if (SECRET_PATTERN.test(contentForSecretScan(html))) throw new Error("customer output contains secret-like text");
   fs.writeFileSync(outputPath, html);
   const en = report.locale === "en-US";
   process.stdout.write(`${en ? PRODUCT_CONFIG.copy.passportReadyEn : PRODUCT_CONFIG.copy.passportReadyZh}\n`);
