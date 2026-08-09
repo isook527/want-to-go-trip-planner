@@ -31,7 +31,7 @@ CONTRACT_PATH = Path(__file__).resolve().parent.parent / "references" / "shared-
 def load_product_config() -> dict[str, Any]:
     with CONFIG_PATH.open("r", encoding="utf-8") as handle:
         config = json.load(handle)
-    required = {"version", "contractVersion", "sourcePolicyVersion", "form", "offers", "copy"}
+    required = {"version", "contractVersion", "sourcePolicyVersion", "form", "offers", "copy", "paymentWorkflow"}
     missing = sorted(required - set(config))
     if missing:
         raise RuntimeError(f"product config missing keys: {', '.join(missing)}")
@@ -43,6 +43,15 @@ VERSION = str(PRODUCT_CONFIG["version"])
 CONTRACT_VERSION = str(PRODUCT_CONFIG["contractVersion"])
 SOURCE_POLICY_VERSION = str(PRODUCT_CONFIG["sourcePolicyVersion"])
 CTA_URL = str(PRODUCT_CONFIG["form"]["requestUrl"])
+PUBLIC_OFFER_ID = str(PRODUCT_CONFIG["form"]["publicOfferId"])
+REQUEST_WORKFLOW_STAGES = list(PRODUCT_CONFIG["paymentWorkflow"]["stages"])
+REQUEST_STAGE_REQUIREMENTS = {
+    "scope_schedule_confirmed": ("agreedReviewDate", "deliveryDueAt", "scopeConfirmedAt"),
+    "customer_confirmed": ("customerConfirmedAt",),
+    "payment_instructions_sent": ("paymentInstructionsSentAt",),
+    "payment_recorded": ("paymentRecordedAt",),
+    "in_delivery": ("deliveryStartedAt",),
+}
 PENDING_DESTINATION_KEY = "pending"
 DESTINATION_ALIASES = {
     "上海": "shanghai",
@@ -265,6 +274,54 @@ def migrate_library_data(raw: dict[str, Any]) -> tuple[dict[str, Any], list[str]
         }
         if source_name in name_aliases:
             place["nameSource"] = name_aliases[source_name]
+    for snapshot in data["verificationSnapshots"]:
+        if not isinstance(snapshot, dict):
+            continue
+        if text(snapshot.get("sourcePolicyVersion")) != SOURCE_POLICY_VERSION:
+            snapshot["sourcePolicyVersion"] = SOURCE_POLICY_VERSION
+            changes.append(f"verification_source_policy:{text(snapshot.get('id')) or 'unknown'}")
+        if text(snapshot.get("trigger")) == "pre_trip_on_demand":
+            snapshot["trigger"] = "pre_trip_on_demand_legacy"
+            snapshot["legacyImported"] = True
+            changes.append(f"legacy_verification_snapshot:{text(snapshot.get('id')) or 'unknown'}")
+    manual_limits = PRODUCT_CONFIG["offers"]["manualItineraryBeta"]["limits"]
+    current_statuses = {"draft", *REQUEST_WORKFLOW_STAGES, "declined", "cancelled"}
+    for request in data["tripRequests"]:
+        if not isinstance(request, dict):
+            continue
+        request.setdefault("updatedAt", text(request.get("createdAt")) or now_iso())
+        old_status = text(request.get("status"))
+        if old_status and old_status not in current_statuses:
+            request["legacyStatus"] = old_status
+            request["status"] = "submitted" if old_status == "accepted" else "draft"
+            request["legacyImported"] = True
+            changes.append(f"legacy_trip_request_status:{text(request.get('id')) or 'unknown'}:{old_status}")
+        if text(request.get("offerId")) == PUBLIC_OFFER_ID:
+            days = int(request.get("days", 0) or 0)
+            count = len(request.get("placeIds") or [])
+            if (
+                (days and not manual_limits["daysMin"] <= days <= manual_limits["daysMax"])
+                or (count and not manual_limits["placesMin"] <= count <= manual_limits["placesMax"])
+            ):
+                was_legacy = request.get("legacyImported") is True
+                request["legacyImported"] = True
+                if not was_legacy:
+                    changes.append(f"legacy_trip_request_scope:{text(request.get('id')) or 'unknown'}")
+        status = text(request.get("status"))
+        ordered_statuses = ["draft", *REQUEST_WORKFLOW_STAGES]
+        if status in ordered_statuses:
+            missing_stage_fields = [
+                field
+                for stage, fields in REQUEST_STAGE_REQUIREMENTS.items()
+                if ordered_statuses.index(status) >= ordered_statuses.index(stage)
+                for field in fields
+                if not text(request.get(field))
+            ]
+            if missing_stage_fields:
+                was_legacy = request.get("legacyImported") is True
+                request["legacyImported"] = True
+                if not was_legacy:
+                    changes.append(f"legacy_trip_request_stage:{text(request.get('id')) or 'unknown'}")
     rebuild_source_ledger(data)
     rebuild_media_ledger(data)
     rebuild_destinations(data)
@@ -1378,7 +1435,6 @@ def command_passport(args: argparse.Namespace) -> None:
             "retainedClueCount": len(retained),
             "offers": {
                 "free": PRODUCT_CONFIG["offers"]["free"],
-                "preTripReview": PRODUCT_CONFIG["offers"]["preTripReview"],
                 "manualItineraryBeta": PRODUCT_CONFIG["offers"]["manualItineraryBeta"],
             },
             "requestForm": {
@@ -1715,9 +1771,59 @@ def validate_library_contract(library: dict[str, Any]) -> list[str]:
         if not isinstance(request, dict):
             issues.append("invalid_trip_request")
             continue
+        request_id = text(request.get("id"))
+        offer_id = text(request.get("offerId"))
+        if offer_id not in {"pre-trip-review", PUBLIC_OFFER_ID}:
+            issues.append(f"invalid_trip_request_offer:{request_id}")
+        if offer_id == "pre-trip-review" and request.get("legacyImported") is not True:
+            issues.append(f"public_standalone_review_request:{request_id}")
+        allowed_statuses = {"draft", *REQUEST_WORKFLOW_STAGES, "declined", "cancelled"}
+        request_status = text(request.get("status"))
+        if request_status not in allowed_statuses:
+            issues.append(f"invalid_trip_request_status:{request_id}")
+        if offer_id == PUBLIC_OFFER_ID and request.get("legacyImported") is not True:
+            limits = PRODUCT_CONFIG["offers"]["manualItineraryBeta"]["limits"]
+            if request.get("days") not in (None, ""):
+                days = int(request.get("days", 0) or 0)
+                if not limits["daysMin"] <= days <= limits["daysMax"]:
+                    issues.append(f"invalid_trip_request_days:{request_id}")
+            if request.get("placeIds"):
+                count = len(request.get("placeIds") or [])
+                if not limits["placesMin"] <= count <= limits["placesMax"]:
+                    issues.append(f"invalid_trip_request_places:{request_id}")
+        ordered_statuses = ["draft", *REQUEST_WORKFLOW_STAGES]
+        if request.get("legacyImported") is not True and request_status in ordered_statuses:
+            for stage, fields in REQUEST_STAGE_REQUIREMENTS.items():
+                if ordered_statuses.index(request_status) >= ordered_statuses.index(stage):
+                    for field in fields:
+                        if not text(request.get(field)):
+                            issues.append(f"missing_trip_request_stage_field:{request_id}:{field}")
         for place_id in request.get("placeIds") or []:
             if text(place_id) not in place_ids:
                 issues.append(f"dangling_trip_request_place:{request.get('id')}:{place_id}")
+    trip_request_ids = ids_by_kind.get("tripRequests", set())
+    for snapshot in library.get("verificationSnapshots") or []:
+        if not isinstance(snapshot, dict):
+            issues.append("invalid_verification_snapshot")
+            continue
+        snapshot_id = text(snapshot.get("id"))
+        trigger = text(snapshot.get("trigger"))
+        if trigger not in {"agreed_date_once", "pre_trip_on_demand_legacy"}:
+            issues.append(f"invalid_review_trigger:{snapshot_id}")
+        if trigger == "pre_trip_on_demand_legacy":
+            if snapshot.get("legacyImported") is not True:
+                issues.append(f"legacy_review_not_marked:{snapshot_id}")
+        else:
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", text(snapshot.get("agreedReviewDate"))):
+                issues.append(f"missing_agreed_review_date:{snapshot_id}")
+            if snapshot.get("agreementConfirmed") is not True:
+                issues.append(f"review_agreement_not_confirmed:{snapshot_id}")
+            service_context = text(snapshot.get("serviceContext"))
+            if service_context not in {"manual_itinerary_beta", "standalone_non_public"}:
+                issues.append(f"invalid_review_service_context:{snapshot_id}")
+            request_id = text(snapshot.get("tripRequestId"))
+            if service_context == "manual_itinerary_beta" and request_id not in trip_request_ids:
+                issues.append(f"dangling_review_trip_request:{snapshot_id}:{request_id}")
     return sorted(set(issues))
 
 
@@ -1750,7 +1856,25 @@ def review_diff(previous: Optional[dict[str, Any]], items: list[dict[str, Any]])
 
 def command_review(args: argparse.Namespace) -> None:
     raw = read_json(args.checks)
-    items = raw.get("items") if isinstance(raw, dict) else raw
+    if not isinstance(raw, dict):
+        raise ValueError("checks must be an object with agreed review details")
+    agreed_review_date = text(raw.get("agreedReviewDate"))
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", agreed_review_date):
+        raise ValueError("checks need agreedReviewDate in YYYY-MM-DD format")
+    if raw.get("agreementConfirmed") is not True:
+        raise ValueError("checks need agreementConfirmed: true")
+    service_context = text(raw.get("serviceContext"))
+    if service_context not in {"manual_itinerary_beta", "standalone_non_public"}:
+        raise ValueError("checks need a supported non-monitoring serviceContext")
+    trip_request_id = text(raw.get("tripRequestId"))
+    if service_context == "manual_itinerary_beta" and not trip_request_id:
+        raise ValueError("manual itinerary review needs tripRequestId")
+    checked_at = text(raw.get("checkedAt"))
+    if not checked_at:
+        raise ValueError("checks need checkedAt for the agreed review date")
+    if checked_at[:10] != agreed_review_date:
+        raise ValueError("checkedAt must be on agreedReviewDate")
+    items = raw.get("items")
     if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
         raise ValueError("checks must contain an items array")
     requested_key = destination_key(args.destination)
@@ -1763,6 +1887,19 @@ def command_review(args: argparse.Namespace) -> None:
         item.setdefault("facts", {})
     snapshot: dict[str, Any] = {}
     with library_transaction(args.library) as library:
+        if service_context == "manual_itinerary_beta":
+            request = next(
+                (item for item in library["tripRequests"] if text(item.get("id")) == trip_request_id),
+                None,
+            )
+            if not request or text(request.get("offerId")) != PUBLIC_OFFER_ID:
+                raise ValueError("tripRequestId must reference the manual itinerary beta")
+            if text(request.get("destinationKey")) != requested_key:
+                raise ValueError("tripRequestId belongs to another destination")
+            if text(request.get("status")) not in {"payment_recorded", "in_delivery", "completed"}:
+                raise ValueError("the manual service must reach payment_recorded before review")
+            if any(text(item.get("tripRequestId")) == trip_request_id for item in library["verificationSnapshots"]):
+                raise ValueError("the included agreed-date review has already been recorded")
         valid_place_ids = {
             text(place.get("id")) for place in library["places"]
             if text(place.get("destinationKey")) == requested_key
@@ -1781,14 +1918,18 @@ def command_review(args: argparse.Namespace) -> None:
         snapshot = {
             "id": f"verification-{uuid.uuid4().hex[:12]}",
             "destinationKey": requested_key,
-            "trigger": "pre_trip_on_demand",
-            "checkedAt": text(raw.get("checkedAt")) if isinstance(raw, dict) else "",
+            "trigger": "agreed_date_once",
+            "agreedReviewDate": agreed_review_date,
+            "agreementConfirmed": True,
+            "serviceContext": service_context,
+            "checkedAt": checked_at,
             "sourcePolicyVersion": SOURCE_POLICY_VERSION,
             "items": copy.deepcopy(items),
             "changes": changes,
-            "summary": text(raw.get("summary")) if isinstance(raw, dict) else "",
+            "summary": text(raw.get("summary")),
         }
-        snapshot["checkedAt"] = snapshot["checkedAt"] or now_iso()
+        if trip_request_id:
+            snapshot["tripRequestId"] = trip_request_id
         library["verificationSnapshots"].append(snapshot)
         append_event(
             library,
@@ -1807,27 +1948,38 @@ def command_trip_request(args: argparse.Namespace) -> None:
     if not isinstance(request, dict):
         raise ValueError("trip request must be an object")
     offer_id = text(request.get("offerId"))
-    if offer_id not in {"pre-trip-review", "manual-itinerary-beta"}:
-        raise ValueError("unsupported offerId")
+    if offer_id != PUBLIC_OFFER_ID:
+        raise ValueError("standalone pre-trip review is not a public request option")
     place_ids = merge_unique(request.get("placeIds") or [])
     destination = text(request.get("destination"))
     destination_key_value = text(request.get("destinationKey")) or destination_key(destination)
-    if offer_id == "manual-itinerary-beta":
-        limits = PRODUCT_CONFIG["offers"]["manualItineraryBeta"]["limits"]
-        days = int(request.get("days", 0) or 0)
-        if not limits["daysMin"] <= days <= limits["daysMax"]:
-            raise ValueError("manual itinerary beta requires 1–3 days")
-        if not limits["placesMin"] <= len(place_ids) <= limits["placesMax"]:
-            raise ValueError("manual itinerary beta requires 2–10 places")
+    limits = PRODUCT_CONFIG["offers"]["manualItineraryBeta"]["limits"]
+    days = int(request.get("days", 0) or 0)
+    if not limits["daysMin"] <= days <= limits["daysMax"]:
+        raise ValueError(
+            f"manual itinerary beta requires {limits['daysMin']}–{limits['daysMax']} days"
+        )
+    if not limits["placesMin"] <= len(place_ids) <= limits["placesMax"]:
+        raise ValueError(
+            f"manual itinerary beta requires {limits['placesMin']}–{limits['placesMax']} places"
+        )
+    status = text(request.get("status")) or "draft"
+    allowed_statuses = {"draft", *REQUEST_WORKFLOW_STAGES, "declined", "cancelled"}
+    if status not in allowed_statuses:
+        raise ValueError("unsupported trip request status")
     entity = {
         "id": text(request.get("id")) or f"trip-request-{uuid.uuid4().hex[:12]}",
         "offerId": offer_id,
         "destinationKey": destination_key_value,
-        "status": text(request.get("status")) or "draft",
+        "status": status,
         "createdAt": text(request.get("createdAt")) or now_iso(),
         "updatedAt": now_iso(),
     }
-    for key in ("startDate", "days", "contact", "notes"):
+    for key in (
+        "startDate", "days", "agreedReviewDate", "deliveryDueAt", "scopeConfirmedAt",
+        "customerConfirmedAt", "paymentInstructionsSentAt", "paymentRecordedAt",
+        "deliveryStartedAt", "contact", "notes",
+    ):
         if request.get(key) not in (None, ""):
             entity[key] = request[key]
     if place_ids:
@@ -1841,6 +1993,31 @@ def command_trip_request(args: argparse.Namespace) -> None:
             known = {text(place.get("id")) for place in library["places"] if text(place.get("destinationKey")) == destination_key_value}
             if set(place_ids) - known:
                 raise ValueError("trip request contains unknown or cross-destination places")
+        existing = next(
+            (item for item in library["tripRequests"] if text(item.get("id")) == entity["id"]),
+            None,
+        )
+        if existing:
+            merged_entity = copy.deepcopy(existing)
+            merged_entity.update(entity)
+            merged_entity["createdAt"] = text(existing.get("createdAt")) or entity["createdAt"]
+            entity = merged_entity
+            previous_status = text(existing.get("status"))
+            if status not in {previous_status, "declined", "cancelled"}:
+                ordered = ["draft", *REQUEST_WORKFLOW_STAGES]
+                if previous_status not in ordered or status not in ordered:
+                    raise ValueError("unsupported trip request status transition")
+                if ordered.index(status) != ordered.index(previous_status) + 1:
+                    raise ValueError("trip request stages cannot be skipped or reversed")
+        elif status not in {"draft", "submitted"}:
+            raise ValueError("a new trip request must start as draft or submitted")
+        ordered = ["draft", *REQUEST_WORKFLOW_STAGES]
+        if status in ordered:
+            for stage, fields in REQUEST_STAGE_REQUIREMENTS.items():
+                if ordered.index(status) >= ordered.index(stage):
+                    missing = [field for field in fields if not text(entity.get(field))]
+                    if missing:
+                        raise ValueError(f"{stage} requires: {', '.join(missing)}")
         library["tripRequests"] = [item for item in library["tripRequests"] if text(item.get("id")) != entity["id"]]
         library["tripRequests"].append(entity)
         append_event(library, operation_id, "trip_request.save", entity["id"], after={"offerId": offer_id, "status": entity["status"]})

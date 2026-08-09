@@ -213,7 +213,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
             self.assertEqual(len(saved["places"]), 2)
             self.assertTrue(saved["bundles"][0]["passportGenerated"])
 
-    def test_11_renderer_uses_configured_service_options_and_keeps_source_link(self):
+    def test_11_renderer_uses_two_public_tiers_and_keeps_source_link(self):
         config = product_config()
         payload = {
             "locale": "zh-CN",
@@ -224,21 +224,13 @@ class PublicSkillRegressionTests(unittest.TestCase):
         }
         html = self.render(payload)
         self.assertIn("kornvia-passport-2.1.0", html)
-        offers_by_id = {offer["id"]: offer for offer in config["offers"].values()}
-        service_select = re.search(
-            r'<select name="offerId"[^>]*>(.*?)</select>', html, re.DOTALL,
-        )
-        self.assertIsNotNone(service_select)
-        rendered_options = re.findall(
-            r'<option value="([^"]+)">([^<]+)</option>', service_select.group(1),
-        )
-        self.assertTrue(rendered_options)
-        for offer_id, label in rendered_options:
-            if not offer_id:
-                continue
-            self.assertIn(offer_id, offers_by_id)
-            self.assertIn(offers_by_id[offer_id]["price"], label)
-            self.assertIn(offers_by_id[offer_id]["nameZh"], label)
+        self.assertIn(config["offers"]["free"]["price"], html)
+        self.assertIn(config["offers"]["free"]["nameZh"], html)
+        self.assertIn(config["offers"]["manualItineraryBeta"]["price"], html)
+        self.assertIn(config["offers"]["manualItineraryBeta"]["nameZh"], html)
+        self.assertNotIn(config["offers"]["preTripReview"]["price"], html)
+        self.assertIn('name="offerId" value="manual-itinerary-beta"', html)
+        self.assertNotIn('<select name="offerId"', html)
         self.assertIn(config["form"]["requestUrl"], html)
         self.assertIn("https://example.com/source", html)
         self.assertIn("另有 2 条地点线索已保留", html)
@@ -280,6 +272,9 @@ class PublicSkillRegressionTests(unittest.TestCase):
             self.assertNotIn(banned, customer_text)
         for offer in product_config()["offers"].values():
             self.assertNotIn(f'{offer["price"]} 完整逐日行程', customer_text)
+        self.assertNotIn("¥39.9", customer_text)
+        self.assertNotIn("正式价 ¥399", customer_text)
+        self.assertNotIn("固定每周限单", customer_text)
 
     def test_13_display_image_finds_photo_rich_region_and_makes_four_three_crop(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -427,11 +422,19 @@ class PublicSkillRegressionTests(unittest.TestCase):
         self.assertIn('name="notes" maxlength="1200"', html)
         self.assertIn('name="locale" value="zh-CN"', html)
         self.assertIn('name="placeCount" value="1"', html)
-        self.assertIn('name="offerId" required', html)
-        self.assertIn('value="pre-trip-review"', html)
-        self.assertIn('value="manual-itinerary-beta"', html)
+        self.assertIn('name="offerId" value="manual-itinerary-beta"', html)
+        self.assertNotIn('value="pre-trip-review"', html)
+        days_select = re.search(r'<select name="days"[^>]*>(.*?)</select>', html, re.DOTALL)
+        self.assertIsNotNone(days_select)
+        day_values = re.findall(r'<option value="([^"]*)">', days_select.group(1))
+        self.assertEqual(day_values, ["", "3", "4", "5", "6", "7"])
         self.assertIn('name="website" tabindex="-1"', html)
-        self.assertIn("提交需求，不会立即扣款", html)
+        self.assertIn("提交行程需求，不会立即扣款", html)
+        self.assertIn("这些信息只用于确认行程范围、档期、交付时间和后续联系", html)
+        self.assertIn("不在此页面收款", html)
+        self.assertIn("双方约定的复核日检查一次", html)
+        self.assertIn("提交意愿 → 确认范围、档期和交付时间", html)
+        self.assertNotIn("自动扣款", html)
         self.assertIn('class="fallback"', html)
         self.assertIn("打开备用需求页", html)
         self.assertIn("destination=%E6%9B%BC%E8%B0%B7", html)
@@ -1444,6 +1447,16 @@ class PublicSkillRegressionTests(unittest.TestCase):
         config = product_config()
         self.assertEqual(config["version"], "2.1.0")
         self.assertTrue(config["offers"])
+        self.assertEqual(config["form"]["publicOfferId"], "manual-itinerary-beta")
+        self.assertTrue(config["form"]["intentOnly"])
+        self.assertFalse(config["form"]["chargeOnSubmit"])
+        self.assertFalse(config["offers"]["preTripReview"]["publicSalesEntry"])
+        self.assertEqual(config["offers"]["preTripReview"]["includedInOfferId"], "manual-itinerary-beta")
+        self.assertEqual(config["offers"]["manualItineraryBeta"]["limits"]["daysMin"], 3)
+        self.assertEqual(config["offers"]["manualItineraryBeta"]["limits"]["daysMax"], 7)
+        self.assertEqual(config["offers"]["manualItineraryBeta"]["limits"]["placesMax"], 15)
+        self.assertFalse(config["paymentWorkflow"]["automaticCharge"])
+        self.assertFalse(config["paymentWorkflow"]["publicStaticPaymentCode"])
         offer_ids = []
         for offer in config["offers"].values():
             for required in ("id", "nameZh", "nameEn", "price"):
@@ -1456,6 +1469,12 @@ class PublicSkillRegressionTests(unittest.TestCase):
         commercial_literals = {
             config["form"]["requestUrl"],
             *(offer["price"] for offer in config["offers"].values()),
+            config["form"]["copy"]["submitZh"],
+            config["form"]["copy"]["sectionTitleZh"],
+            config["form"]["privacy"]["boundaryZh"],
+            config["paymentWorkflow"]["copyZh"],
+            config["offers"]["manualItineraryBeta"]["descriptionZh"],
+            config["offers"]["manualItineraryBeta"]["availabilityZh"],
         }
         for literal in commercial_literals:
             self.assertNotIn(literal, python_source)
@@ -1473,6 +1492,15 @@ class PublicSkillRegressionTests(unittest.TestCase):
         for definition in ("destination", "place", "source", "media", "verificationSnapshot", "tripRequest"):
             self.assertIn(definition, schema["$defs"])
             self.assertTrue(schema["$defs"][definition]["required"])
+        snapshot = schema["$defs"]["verificationSnapshot"]
+        self.assertIn("agreed_date_once", snapshot["properties"]["trigger"]["enum"])
+        self.assertIn("pre_trip_on_demand_legacy", snapshot["properties"]["trigger"]["enum"])
+        agreed_review_condition = snapshot["allOf"][0]["then"]["required"]
+        self.assertIn("agreedReviewDate", agreed_review_condition)
+        self.assertIn("agreementConfirmed", agreed_review_condition)
+        request = schema["$defs"]["tripRequest"]
+        self.assertIn("scope_schedule_confirmed", request["properties"]["status"]["enum"])
+        self.assertIn("payment_recorded", request["properties"]["status"]["enum"])
 
     def test_45_external_prompt_injection_is_flagged_and_not_used_as_a_name(self):
         args = argparse.Namespace(
@@ -1604,6 +1632,16 @@ class PublicSkillRegressionTests(unittest.TestCase):
                     "failures": [],
                 }],
                 "places": [],
+                "verificationSnapshots": [{
+                    "id": "legacy-review", "destinationKey": "bangkok",
+                    "trigger": "pre_trip_on_demand", "checkedAt": "2026-07-01T08:00:00Z",
+                    "sourcePolicyVersion": "2.0.0", "items": [], "changes": [],
+                }],
+                "tripRequests": [{
+                    "id": "legacy-request", "offerId": "manual-itinerary-beta",
+                    "destinationKey": "bangkok", "status": "accepted", "days": 1,
+                    "createdAt": "2026-07-01T08:00:00Z",
+                }],
             }, ensure_ascii=False), encoding="utf-8")
             before = library_path.read_bytes()
             dry = subprocess.run(
@@ -1620,6 +1658,12 @@ class PublicSkillRegressionTests(unittest.TestCase):
             self.assertEqual(migrated["schemaVersion"], "2.1.0")
             self.assertEqual(migrated["sources"][0]["submittedUrl"], "https://example.com/legacy")
             self.assertEqual(migrated["sources"][0]["ledgerVersion"], 1)
+            self.assertEqual(migrated["verificationSnapshots"][0]["trigger"], "pre_trip_on_demand_legacy")
+            self.assertTrue(migrated["verificationSnapshots"][0]["legacyImported"])
+            self.assertNotIn("agreedReviewDate", migrated["verificationSnapshots"][0])
+            self.assertEqual(migrated["tripRequests"][0]["legacyStatus"], "accepted")
+            self.assertTrue(migrated["tripRequests"][0]["legacyImported"])
+            self.assertEqual(migrated["tripRequests"][0]["days"], 1)
 
     def test_50_repair_blocks_changed_original_media(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1656,6 +1700,8 @@ class PublicSkillRegressionTests(unittest.TestCase):
             W2G.save_library(library_path, library)
             checks_path.write_text(json.dumps({
                 "checkedAt": "2026-08-09T08:00:00Z",
+                "agreedReviewDate": "2026-08-09", "agreementConfirmed": True,
+                "serviceContext": "standalone_non_public",
                 "items": [{
                     "placeId": "place-1", "accessLevel": "public_readable",
                     "canSupport": ["opening_hours_observed"], "cannotProve": ["future_queue"],
@@ -1668,6 +1714,8 @@ class PublicSkillRegressionTests(unittest.TestCase):
                 ))
             checks_path.write_text(json.dumps({
                 "checkedAt": "2026-08-10T08:00:00Z",
+                "agreedReviewDate": "2026-08-10", "agreementConfirmed": True,
+                "serviceContext": "standalone_non_public",
                 "items": [{
                     "placeId": "place-1", "accessLevel": "public_readable",
                     "canSupport": ["opening_hours_observed"], "cannotProve": ["future_queue"],
@@ -1680,7 +1728,9 @@ class PublicSkillRegressionTests(unittest.TestCase):
                 ))
             snapshots = json.loads(library_path.read_text(encoding="utf-8"))["verificationSnapshots"]
             self.assertEqual(len(snapshots), 2)
-            self.assertEqual(snapshots[-1]["trigger"], "pre_trip_on_demand")
+            self.assertEqual(snapshots[-1]["trigger"], "agreed_date_once")
+            self.assertEqual(snapshots[-1]["agreedReviewDate"], "2026-08-10")
+            self.assertTrue(snapshots[-1]["agreementConfirmed"])
             self.assertEqual(snapshots[-1]["changes"], [{
                 "placeId": "place-1", "field": "openingHoursText",
                 "before": "06:00–22:00", "after": "08:00–20:00",
@@ -1709,11 +1759,87 @@ class PublicSkillRegressionTests(unittest.TestCase):
             self.assertIn('"externalPostPerformed": false', output.getvalue())
             request_path.write_text(json.dumps({
                 "offerId": "manual-itinerary-beta", "destination": "曼谷",
-                "days": 4, "placeIds": ["a", "b"],
+                "days": 8, "placeIds": ["a", "b"],
             }, ensure_ascii=False), encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "1–3 days"):
+            with self.assertRaisesRegex(ValueError, "3–7 days"):
                 W2G.command_trip_request(argparse.Namespace(
                     library=str(library_path), request=str(request_path), operation_id="request-invalid",
+                ))
+            request_path.write_text(json.dumps({
+                "offerId": "pre-trip-review", "destination": "曼谷",
+                "days": 3, "placeIds": ["a", "b"],
+            }, ensure_ascii=False), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "not a public request option"):
+                W2G.command_trip_request(argparse.Namespace(
+                    library=str(library_path), request=str(request_path), operation_id="review-sale-blocked",
+                ))
+
+    def test_52b_trip_request_follows_manual_confirmation_and_payment_stages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            library_path = base / "library.json"
+            request_path = base / "request.json"
+            library = W2G.empty_library()
+            library["places"] = [
+                complete_business(id="a", destinationKey="bangkok", destinationStatus="confirmed"),
+                complete_business(id="b", verifiedName="Beta", address="Beta Road", destinationKey="bangkok", destinationStatus="confirmed"),
+            ]
+            W2G.save_library(library_path, library)
+            common = {
+                "id": "request-flow", "offerId": "manual-itinerary-beta", "destination": "曼谷",
+                "days": 3, "placeIds": ["a", "b"],
+            }
+
+            def save(stage, operation_id, **extra):
+                request_path.write_text(json.dumps({**common, "status": stage, **extra}, ensure_ascii=False), encoding="utf-8")
+                with contextlib.redirect_stdout(io.StringIO()):
+                    W2G.command_trip_request(argparse.Namespace(
+                        library=str(library_path), request=str(request_path), operation_id=operation_id,
+                    ))
+
+            save("submitted", "flow-1")
+            with self.assertRaisesRegex(ValueError, "cannot be skipped"):
+                save("payment_recorded", "flow-skip", paymentRecordedAt="2026-08-12T09:00:00Z")
+            save(
+                "scope_schedule_confirmed", "flow-2",
+                agreedReviewDate="2026-09-10", deliveryDueAt="2026-08-20T09:00:00Z",
+                scopeConfirmedAt="2026-08-11T09:00:00Z",
+            )
+            save("customer_confirmed", "flow-3", customerConfirmedAt="2026-08-11T10:00:00Z")
+            save("payment_instructions_sent", "flow-4", paymentInstructionsSentAt="2026-08-11T11:00:00Z")
+            save("payment_recorded", "flow-5", paymentRecordedAt="2026-08-12T09:00:00Z")
+            save("in_delivery", "flow-6", deliveryStartedAt="2026-08-12T10:00:00Z")
+            saved = json.loads(library_path.read_text(encoding="utf-8"))["tripRequests"][0]
+            self.assertEqual(saved["status"], "in_delivery")
+            self.assertEqual(saved["agreedReviewDate"], "2026-09-10")
+            self.assertEqual(W2G.validate_library_contract(json.loads(library_path.read_text(encoding="utf-8"))), [])
+
+    def test_52c_manual_service_review_runs_once_on_the_agreed_date(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            library_path = base / "library.json"
+            checks_path = base / "checks.json"
+            library = W2G.empty_library()
+            library["places"] = [complete_business(destinationKey="bangkok", destinationStatus="confirmed")]
+            library["tripRequests"] = [{
+                "id": "request-paid", "offerId": "manual-itinerary-beta", "destinationKey": "bangkok",
+                "status": "in_delivery", "createdAt": "2026-08-09T00:00:00Z",
+                "updatedAt": "2026-08-12T10:00:00Z",
+            }]
+            W2G.save_library(library_path, library)
+            checks_path.write_text(json.dumps({
+                "checkedAt": "2026-09-10T08:00:00+08:00",
+                "agreedReviewDate": "2026-09-10", "agreementConfirmed": True,
+                "serviceContext": "manual_itinerary_beta", "tripRequestId": "request-paid",
+                "items": [{"placeId": "place-1", "facts": {"openingHoursText": "08:00–20:00"}}],
+            }, ensure_ascii=False), encoding="utf-8")
+            with contextlib.redirect_stdout(io.StringIO()):
+                W2G.command_review(argparse.Namespace(
+                    library=str(library_path), destination="曼谷", checks=str(checks_path), output="", operation_id="paid-review-1",
+                ))
+            with self.assertRaisesRegex(ValueError, "already been recorded"):
+                W2G.command_review(argparse.Namespace(
+                    library=str(library_path), destination="曼谷", checks=str(checks_path), output="", operation_id="paid-review-2",
                 ))
 
     def test_53_content_depth_visitor_mode_and_customer_scan(self):

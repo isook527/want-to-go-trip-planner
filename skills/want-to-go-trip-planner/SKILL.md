@@ -5,7 +5,7 @@ description: 把本轮旅行截图、顾客实际提交的公开链接、视频�
 
 # 想去就出发
 
-把零散旅行灵感收进一个可持续维护的本地想去库。默认只收纳；只有用户明确要求时才生成护照或复核。
+把零散旅行灵感收进一个可持续维护的本地想去库。默认只收纳；只有用户明确要求时才生成护照。出发前复核只在双方约定的复核日执行一次并交付变化清单。
 
 ## 先读取唯一契约与配置
 
@@ -157,15 +157,17 @@ python3 scripts/want_to_go.py undo --library want-to-go.json --operation-id OP
 
 库文件写入必须使用相邻文件锁、同目录临时文件、`fsync` 与原子替换。锁在 macOS/Linux 使用 `flock`，Windows 使用 `msvcrt`；不得通过关闭锁绕过并发错误。
 
-## 出发前按需复核
+## 出发前约定日期复核
 
-¥39.9 只对应出发前复核，不是完整逐日行程。
+独立复核能力保留，但不在 Skill 客户交付中展示独立价格、销售入口或直接购买表达。对客的 ¥199 人工逐日行程内测包含一次双方约定日期的出发前复核；不得称为赠品。
 
-1. 用户提供或同意本轮实际公开检查。
+1. 双方先确认唯一复核日；checks 文件必须写入 `agreedReviewDate`、`agreementConfirmed: true` 和 `checkedAt`。
 2. 为每个地点记录 `accessLevel / canSupport / cannotProve / facts`。
 3. 用 `review` 保存 `verificationSnapshot`。
 4. 与同目的地上一快照生成字段级 diff；没有旧快照时当前事实全部视为新增。
-5. 不承诺持续监控；每次复核都必须由用户按需触发。
+5. 人工服务内的复核填写 `serviceContext: manual_itinerary_beta` 与对应 `tripRequestId`；同一需求只记录一次。
+6. 非公开独立能力只能填写 `serviceContext: standalone_non_public`，不得据此生成客户购买入口。
+7. 只列出本次发现的变化；不承诺实时状态、持续监控或主动通知。
 
 ```bash
 python3 scripts/want_to_go.py review --library want-to-go.json --destination 曼谷 --checks checks.json --output review-diff.json
@@ -175,11 +177,12 @@ python3 scripts/want_to_go.py review --library want-to-go.json --destination 曼
 
 商业事实只从 `config/product.json` 读取：
 
-- 免费：收纳、分库、地点卡、护照、基础片区分组、修改、导出。
-- ¥39.9：出发前复核，不承诺完整逐日行程。
-- ¥199：一个城市、1–3 天、2–10 个地点的人工逐日行程内测，含一次范围内修改，不代订、不持续监控。
+- 免费自己整理：收纳、分库、地点卡与配图、护照、基础片区分组、修改、本地导出。
+- 黄色推荐 ¥199：一个城市、3–7 天、2–15 个地点的人工逐日行程内测，含一次范围内修改和一次双方约定日期的出发前复核；不代订、不持续监控。
+- 只使用“内测期限量接单，提交后确认档期”，不展示正式价、固定每周限单数字或静态收款码。
+- 客户交付采用两档结构，不展示独立复核价格卡、销售入口或直接购买表达。
 
-本地 `trip-request` 只保存需求草稿或记录，不执行外部 POST。真实提交、支付、代订、持续监控和线上同步都需要单独授权。
+页内 CTA 只提交行程需求，不在提交时收款。固定闭环为：提交意愿 → 确认范围、档期和交付时间 → 顾客确认 → 单独发送付款方式 → 人工登记付款 → 开始交付。本地 `trip-request` 只保存需求草稿或阶段记录，不执行外部 POST、自动扣款或支付操作；状态不得跳级或倒退。真实 POST、付款动作、代订、持续监控和线上同步都需要单独授权。
 
 ## 迁移、修复、导出与扫描
 
@@ -194,7 +197,7 @@ python3 scripts/want_to_go.py scan --path 想去护照.html --mode customer
 python3 scripts/want_to_go.py scan --path want-to-go-trip-planner-skill-2.1.0.zip --mode package
 ```
 
-- `migrate --dry-run` 只报告；正式迁移原子写入并记录事件。v1.2.3 原始来源和媒体不得丢失。
+- `migrate --dry-run` 只报告；正式迁移原子写入并记录事件。v1.2.3 原始来源和媒体不得丢失。旧按需复核只能标为 `pre_trip_on_demand_legacy`，不得伪造双方约定日期；旧范围需求保留原值并标记 `legacyImported`。
 - `repair` 只重建可推导索引和账本；原图哈希不一致、重复 place ID 等情况必须阻塞，不覆盖原图。
 - `scan --mode customer` 检查绝对路径、内部字段、宿主信息和 secret-like 文本。
 - `scan --mode package` 检查密钥、`.DS_Store`、缓存、锁和临时文件。

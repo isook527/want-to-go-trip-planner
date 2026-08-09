@@ -13,7 +13,9 @@ import {
 const MAX_INPUT_BYTES = 12 * 1024 * 1024;
 const MAX_PHOTO_BYTES = 16 * 1024 * 1024;
 const CTA_URL = PRODUCT_CONFIG.form.requestUrl;
-const REVIEW_OFFER = PRODUCT_CONFIG.offers.preTripReview;
+const FALLBACK_URL = PRODUCT_CONFIG.form.fallbackUrl;
+const FORM_COPY = PRODUCT_CONFIG.form.copy;
+const FREE_OFFER = PRODUCT_CONFIG.offers.free;
 const MANUAL_OFFER = PRODUCT_CONFIG.offers.manualItineraryBeta;
 const INTERNAL_PATTERN =
   /(?:\.workbuddy|\.claude|\/Users\/|\/mnt\/|localhost|127\.0\.0\.1|sourceRefs?|sourceIds?|mediaIds?|confidenceScore|detailLookupAudit|nameSource|hostChecks|platformAccess|platformItemId|platformEngagement|failureCode|paidPlanningReady|OCR|模型|宿主诊断|schemaVersion|paymentCode|operationId|tombstones?)/i;
@@ -76,55 +78,65 @@ function requestOption(value, label) {
   return `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`;
 }
 
+function formCopy(en, key) {
+  return FORM_COPY[`${key}${en ? "En" : "Zh"}`];
+}
+
 function requestCard(report, locale, placeCount) {
   const en = locale === "en-US";
   const destination = clean(report.destination, 80);
-  const fallbackUrl = new URL(CTA_URL);
+  const fallbackUrl = new URL(FALLBACK_URL);
   fallbackUrl.searchParams.set("destination", destination);
   fallbackUrl.searchParams.set("locale", locale);
   fallbackUrl.searchParams.set("placeCount", String(placeCount));
   return `<section class="upgrade">
     <div class="upgrade-copy" aria-labelledby="paid-options-title">
-      <p class="kicker">KORNVIA · ${en ? "OPTIONAL SERVICES" : "按需服务"}</p>
-      <div class="upgrade-price"><strong>${escapeHtml(REVIEW_OFFER.price)}</strong><span>${en ? "/ pre-trip review" : "/ 出发前复核"}</span></div>
-      <h2 id="paid-options-title">${en ? "Recheck saved places before departure" : "临近出发，再复核一次"}</h2>
-      <p>${escapeHtml(en ? REVIEW_OFFER.descriptionEn : REVIEW_OFFER.descriptionZh)}</p>
-      <ul class="upgrade-benefits">
-        <li>${en ? "Shows a dated change diff against the last review" : "按复核时间交付变更 diff"}</li>
-        <li>${en ? "Does not promise a full day-by-day itinerary" : "不承诺完整逐日行程"}</li>
-      </ul>
-      <div class="manual-offer">
-        <p class="manual-price">${escapeHtml(MANUAL_OFFER.price)} · ${escapeHtml(en ? MANUAL_OFFER.nameEn : MANUAL_OFFER.nameZh)}</p>
-        <p>${escapeHtml(en ? MANUAL_OFFER.descriptionEn : MANUAL_OFFER.descriptionZh)}</p>
-        <p class="fine-print">${escapeHtml(en ? MANUAL_OFFER.exclusionsEn.join(" · ") : MANUAL_OFFER.exclusionsZh.join(" · "))}</p>
+      <p class="kicker">KORNVIA · ${escapeHtml(formCopy(en, "sectionKicker"))}</p>
+      <h2 id="paid-options-title">${escapeHtml(formCopy(en, "sectionTitle"))}</h2>
+      <div class="tier-list">
+        <article class="tier-card free-tier">
+          <p class="tier-name">${escapeHtml(en ? FREE_OFFER.nameEn : FREE_OFFER.nameZh)}</p>
+          <p class="tier-price">${escapeHtml(FREE_OFFER.price)}</p>
+          <ul>${(en ? FREE_OFFER.featuresEn : FREE_OFFER.featuresZh).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+        </article>
+        <article class="tier-card recommended-tier">
+          <p class="recommended-label">${escapeHtml(formCopy(en, "recommendedLabel"))}</p>
+          <p class="tier-name">${escapeHtml(en ? MANUAL_OFFER.nameEn : MANUAL_OFFER.nameZh)}</p>
+          <p class="tier-price">${escapeHtml(MANUAL_OFFER.price)}</p>
+          <p>${escapeHtml(en ? MANUAL_OFFER.descriptionEn : MANUAL_OFFER.descriptionZh)}</p>
+          <p class="availability">${escapeHtml(en ? MANUAL_OFFER.availabilityEn : MANUAL_OFFER.availabilityZh)}</p>
+          <p class="service-boundary">${escapeHtml(en ? MANUAL_OFFER.exclusionsEn.join(" · ") : MANUAL_OFFER.exclusionsZh.join(" · "))}</p>
+        </article>
       </div>
     </div>
     <form class="request-form" action="${CTA_URL}" method="post" target="_blank" rel="noopener noreferrer" accept-charset="UTF-8" referrerpolicy="no-referrer">
       <input type="hidden" name="locale" value="${locale}">
       <input type="hidden" name="placeCount" value="${placeCount}">
+      <input type="hidden" name="offerId" value="${escapeHtml(PRODUCT_CONFIG.form.publicOfferId)}">
       <div class="honeypot" aria-hidden="true"><label>Website<input name="website" tabindex="-1" autocomplete="off"></label></div>
-      <h3>${en ? "Send a service request" : "提交服务需求"}</h3>
+      <h3>${escapeHtml(formCopy(en, "requestTitle"))}</h3>
       <div class="request-grid">
-        <label class="full">${en ? "Service" : "服务类型"}<select name="offerId" required>
-          ${requestOption(REVIEW_OFFER.id, `${REVIEW_OFFER.price} · ${en ? REVIEW_OFFER.nameEn : REVIEW_OFFER.nameZh}`)}
-          ${requestOption(MANUAL_OFFER.id, `${MANUAL_OFFER.price} · ${en ? MANUAL_OFFER.nameEn : MANUAL_OFFER.nameZh}`)}
-        </select></label>
-        <label>${en ? "Destination" : "目的地"}<input name="destination" value="${escapeHtml(destination)}" required maxlength="80" autocomplete="address-level1"></label>
-        <label>${en ? "Start date" : "出发日期"}<input name="startDate" type="date" required></label>
-        <label>${en ? "Trip length" : "旅行天数"}<select name="days" required>
-          ${requestOption("", en ? "Select" : "请选择")}
-          ${requestOption("1", en ? "1 day" : "1 天")}
-          ${requestOption("2", en ? "2 days" : "2 天")}
+        <label>${escapeHtml(formCopy(en, "destinationLabel"))}<input name="destination" value="${escapeHtml(destination)}" required maxlength="80" autocomplete="address-level1"></label>
+        <label>${escapeHtml(formCopy(en, "startDateLabel"))}<input name="startDate" type="date" required></label>
+        <label>${escapeHtml(formCopy(en, "daysLabel"))}<select name="days" required>
+          ${requestOption("", formCopy(en, "selectLabel"))}
           ${requestOption("3", en ? "3 days" : "3 天")}
+          ${requestOption("4", en ? "4 days" : "4 天")}
+          ${requestOption("5", en ? "5 days" : "5 天")}
+          ${requestOption("6", en ? "6 days" : "6 天")}
+          ${requestOption("7", en ? "7 days" : "7 天")}
         </select></label>
-        <label>${en ? "Contact" : "联系方式"}<input name="contact" required maxlength="120" placeholder="${en ? "WeChat / phone / email" : "微信号 / 手机号 / 邮箱"}"></label>
-        <label class="full">${en ? "Travel party and preferences" : "同行与偏好"}<textarea name="notes" maxlength="1200" placeholder="${en ? "Party size, walking limit, must-go places, diet or hotel area." : "人数、步行上限、必去地点、饮食禁忌或住宿区域。"}"></textarea></label>
+        <label>${escapeHtml(formCopy(en, "contactLabel"))}<input name="contact" required maxlength="120" placeholder="${escapeHtml(formCopy(en, "contactPlaceholder"))}"></label>
+        <label class="full">${escapeHtml(formCopy(en, "notesLabel"))}<textarea name="notes" maxlength="1200" placeholder="${escapeHtml(formCopy(en, "notesPlaceholder"))}"></textarea></label>
       </div>
-      <button class="submit" type="submit">${en ? "Send request — no charge now" : "提交需求，不会立即扣款"}</button>
-      <p class="fine-print">${en
-        ? "A receipt with a request number opens after the service saves your request."
-        : "服务保存成功后会打开带需求编号的回执页。"}</p>
-      <p class="fallback">${en ? "If no receipt opens, " : "如果提交后没有看到需求编号，"}<a href="${escapeHtml(fallbackUrl.toString())}" target="_blank" rel="noopener noreferrer">${en ? "use the backup request page" : "打开备用需求页"}</a>${en ? "." : "。"}</p>
+      <button class="submit" type="submit">${escapeHtml(formCopy(en, "submit"))}</button>
+      <div class="request-notice">
+        <p><strong>${escapeHtml(formCopy(en, "purposeLabel"))}</strong>${escapeHtml(en ? PRODUCT_CONFIG.form.privacy.purposeEn : PRODUCT_CONFIG.form.privacy.purposeZh)}</p>
+        <p><strong>${escapeHtml(formCopy(en, "handlingLabel"))}</strong>${escapeHtml(en ? PRODUCT_CONFIG.form.privacy.handlingEn : PRODUCT_CONFIG.form.privacy.handlingZh)}</p>
+        <p><strong>${escapeHtml(formCopy(en, "boundaryLabel"))}</strong>${escapeHtml(en ? PRODUCT_CONFIG.form.privacy.boundaryEn : PRODUCT_CONFIG.form.privacy.boundaryZh)}</p>
+      </div>
+      <p class="payment-flow">${escapeHtml(en ? PRODUCT_CONFIG.paymentWorkflow.copyEn : PRODUCT_CONFIG.paymentWorkflow.copyZh)}</p>
+      <p class="fallback">${escapeHtml(formCopy(en, "fallbackPrefix"))}<a href="${escapeHtml(fallbackUrl.toString())}" target="_blank" rel="noopener noreferrer">${escapeHtml(formCopy(en, "fallbackLink"))}</a>${en ? "." : "。"}</p>
     </form>
   </section>`;
 }

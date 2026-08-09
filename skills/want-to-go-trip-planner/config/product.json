@@ -14,8 +14,73 @@
   "form": {
     "method": "POST",
     "requestUrl": "https://trip-api.kornvia.com/trip-requests",
+    "fallbackUrl": "https://trip-api.kornvia.com/trip-requests",
     "legacyUrl": "https://kornvia.com/trip-requests",
-    "legacyStatus": 404
+    "legacyStatus": 404,
+    "publicOfferId": "manual-itinerary-beta",
+    "intentOnly": true,
+    "chargeOnSubmit": false,
+    "privacy": {
+      "purposeZh": "这些信息只用于确认行程范围、档期、交付时间和后续联系。",
+      "purposeEn": "These details are used only to confirm scope, availability, delivery timing and follow-up contact.",
+      "handlingZh": "仅提交目的地、日期、天数、联系方式及必要偏好；由人工查看并跟进，不在此页面收款。",
+      "handlingEn": "Only destination, dates, trip length, contact details and necessary preferences are submitted for manual follow-up; payment is not collected on this page.",
+      "boundaryZh": "本服务不代订、不持续监控；出发前复核仅在双方约定的复核日检查一次并列出发现的变化。",
+      "boundaryEn": "The service does not book or monitor continuously. The pre-trip review is performed once on the agreed review date and lists any changes found."
+    },
+    "copy": {
+      "sectionKickerZh": "两种整理方式",
+      "sectionKickerEn": "TWO WAYS TO PLAN",
+      "sectionTitleZh": "自己整理，或交给人工逐日安排",
+      "sectionTitleEn": "Organize it yourself, or ask us to plan each day",
+      "recommendedLabelZh": "推荐",
+      "recommendedLabelEn": "RECOMMENDED",
+      "requestTitleZh": "提交行程需求",
+      "requestTitleEn": "Send an itinerary request",
+      "destinationLabelZh": "目的地",
+      "destinationLabelEn": "Destination",
+      "startDateLabelZh": "出发日期",
+      "startDateLabelEn": "Start date",
+      "daysLabelZh": "旅行天数",
+      "daysLabelEn": "Trip length",
+      "selectLabelZh": "请选择",
+      "selectLabelEn": "Select",
+      "contactLabelZh": "联系方式",
+      "contactLabelEn": "Contact",
+      "contactPlaceholderZh": "微信号 / 手机号 / 邮箱",
+      "contactPlaceholderEn": "WeChat / phone / email",
+      "notesLabelZh": "同行与偏好",
+      "notesLabelEn": "Travel party and preferences",
+      "notesPlaceholderZh": "人数、步行上限、必去地点、饮食禁忌或住宿区域。",
+      "notesPlaceholderEn": "Party size, walking limit, must-go places, diet or hotel area.",
+      "submitZh": "提交行程需求，不会立即扣款",
+      "submitEn": "Send itinerary request — no charge now",
+      "purposeLabelZh": "信息用途：",
+      "purposeLabelEn": "Purpose: ",
+      "handlingLabelZh": "处理方式：",
+      "handlingLabelEn": "Handling: ",
+      "boundaryLabelZh": "服务边界：",
+      "boundaryLabelEn": "Service boundary: ",
+      "fallbackPrefixZh": "如果提交后没有看到需求编号，",
+      "fallbackPrefixEn": "If no receipt opens, ",
+      "fallbackLinkZh": "打开备用需求页",
+      "fallbackLinkEn": "use the backup request page"
+    }
+  },
+  "paymentWorkflow": {
+    "automaticCharge": false,
+    "publicStaticPaymentCode": false,
+    "stages": [
+      "submitted",
+      "scope_schedule_confirmed",
+      "customer_confirmed",
+      "payment_instructions_sent",
+      "payment_recorded",
+      "in_delivery",
+      "completed"
+    ],
+    "copyZh": "提交意愿 → 确认范围、档期和交付时间 → 顾客确认 → 单独发送付款方式 → 人工登记付款 → 开始交付",
+    "copyEn": "Submit interest → confirm scope, availability and delivery time → customer confirms → payment instructions are sent separately → payment is recorded manually → delivery begins"
   },
   "platformImports": {
     "xiaohongshu": {
@@ -49,10 +114,19 @@
       "nameZh": "想去库与护照",
       "nameEn": "Want-to-go library and passport",
       "price": "¥0",
+      "publicSalesEntry": true,
+      "recommended": false,
       "featuresZh": [
         "截图、链接、视频和文字收纳",
         "按目的地分库与地点卡",
-        "想去护照、基础片区分组、修改与导出"
+        "地点配图与想去护照",
+        "基础片区分组、修改与本地导出"
+      ],
+      "featuresEn": [
+        "Capture screenshots, links, videos and text",
+        "Destination libraries and place cards",
+        "Place images and Want-to-go passport",
+        "Basic area grouping, edits and local export"
       ]
     },
     "preTripReview": {
@@ -60,23 +134,31 @@
       "nameZh": "出发前复核",
       "nameEn": "Pre-trip review",
       "price": "¥39.9",
-      "descriptionZh": "按出发时间复核已收藏地点的公开状态，并交付可见变更；不包含完整逐日行程。",
-      "descriptionEn": "Recheck public place information before departure and show what changed. A full day-by-day itinerary is not included."
+      "publicSalesEntry": false,
+      "includedInOfferId": "manual-itinerary-beta",
+      "reviewMode": "agreed_date_once",
+      "descriptionZh": "保留为非公开的独立复核能力；客户交付中不设价格卡、购买入口或直接购买表达。¥199 人工服务包含一次双方约定日期的出发前复核。",
+      "descriptionEn": "Retained as a non-public standalone review capability without a customer-facing price card or purchase entry. The ¥199 manual service includes one review on an agreed date."
     },
     "manualItineraryBeta": {
       "id": "manual-itinerary-beta",
       "nameZh": "人工逐日行程内测",
       "nameEn": "Manual day-by-day itinerary beta",
       "price": "¥199",
-      "descriptionZh": "一个城市、1–3 天、2–10 个地点，含一次范围内修改。",
-      "descriptionEn": "One city, 1–3 days and 2–10 places, with one in-scope revision.",
+      "publicSalesEntry": true,
+      "recommended": true,
+      "availabilityZh": "内测期限量接单，提交后确认档期",
+      "availabilityEn": "Limited beta availability; timing is confirmed after submission",
+      "descriptionZh": "一个城市、3–7 天、2–15 个地点，含一次范围内修改和一次双方约定日期的出发前复核。",
+      "descriptionEn": "One city, 3–7 days and 2–15 places, with one in-scope revision and one pre-trip review on an agreed date.",
       "limits": {
         "cities": 1,
-        "daysMin": 1,
-        "daysMax": 3,
+        "daysMin": 3,
+        "daysMax": 7,
         "placesMin": 2,
-        "placesMax": 10,
-        "revisions": 1
+        "placesMax": 15,
+        "revisions": 1,
+        "preTripReviews": 1
       },
       "exclusionsZh": [
         "不代订",
@@ -89,11 +171,11 @@
     }
   },
   "copy": {
-    "onboardingZh": "Kornvia 想去就出发已准备好。把本轮旅行截图、公开链接、视频或文字发给我，我会先收进按目的地整理的想去库，不会擅自生成攻略。小红书完整笔记链接、携程地点链接和公开公众号文章会按平台规则读取；马蜂窝遇安全检测时会保留原链接，并请你补截图、保存网页或文字。多地点文章不会冒充一个地点，需要指定地点名或拆分收纳。需要整理时，说“生成曼谷想去护照”。免费版包含收纳、分库、地点卡、护照、基础片区分组、修改和导出；出发前按需复核为 ¥39.9；一个城市、1–3 天、2–10 个地点的人工逐日行程内测为 ¥199，含一次范围内修改，不代订、不持续监控。",
-    "onboardingEn": "Kornvia Want to Go is ready. Send travel screenshots, public links, videos or text from this turn and I will save them by destination in your want-to-go library without creating a guide unless asked. Full Xiaohongshu note URLs, Ctrip place URLs and public WeChat Official Account articles use verified platform adapters. If Mafengwo presents a security check, the submitted URL is retained and a screenshot, saved page or pasted text is requested. Multi-place articles are not presented as one place; name the target place or split the source. The free tier includes capture, destination libraries, place cards, passport, basic area grouping, edits and export. Pre-trip review is ¥39.9. The ¥199 manual itinerary beta covers one city, 1–3 days and 2–10 places with one in-scope revision; it does not include booking or continuous monitoring.",
+    "onboardingZh": "Kornvia 想去就出发已准备好。把本轮旅行截图、公开链接、视频或文字发给我，我会先收进按目的地整理的想去库，不会擅自生成攻略。小红书完整笔记链接、携程地点链接和公开公众号文章会按平台规则读取；马蜂窝遇安全检测时会保留原链接，并请你补截图、保存网页或文字。多地点文章不会冒充一个地点，需要指定地点名或拆分收纳。需要整理时，说“生成曼谷想去护照”。免费档包含收纳、分库、地点卡与配图、护照、基础片区分组、修改和本地导出。¥199 人工逐日行程内测覆盖一个城市、3–7 天、2–15 个地点，含一次范围内修改和一次双方约定日期的出发前复核；不代订、不持续监控。内测期限量接单，提交后确认档期。",
+    "onboardingEn": "Kornvia Want to Go is ready. Send travel screenshots, public links, videos or text from this turn and I will save them by destination in your want-to-go library without creating a guide unless asked. Full Xiaohongshu note URLs, Ctrip place URLs and public WeChat Official Account articles use verified platform adapters. If Mafengwo presents a security check, the submitted URL is retained and a screenshot, saved page or pasted text is requested. Multi-place articles are not presented as one place; name the target place or split the source. The free tier includes capture, destination libraries, place cards and images, passport, basic area grouping, edits and local export. The ¥199 manual itinerary beta covers one city, 3–7 days and 2–15 places with one in-scope revision and one pre-trip review on an agreed date. It does not include booking or continuous monitoring. Beta availability is limited and confirmed after submission.",
     "savedNextStepZh": "想把收藏整理成网页攻略，可以说“生成{destination}想去护照”。",
     "savedNextStepEn": "Say “Create my {destination} Go passport” when you want a web guide.",
-    "passportReadyZh": "想去护照已生成。免费版可继续修改、排序、撤销和导出；临近出发时可提交 ¥39.9 出发前复核。需要人工逐日安排时，¥199 内测仅覆盖一个城市、1–3 天、2–10 个地点，含一次范围内修改，不代订、不持续监控。",
-    "passportReadyEn": "Your Go passport is ready. The free tier remains editable, sortable, undoable and exportable. A pre-trip review is ¥39.9. The ¥199 manual itinerary beta is limited to one city, 1–3 days and 2–10 places with one in-scope revision; no booking or continuous monitoring is included."
+    "passportReadyZh": "想去护照已生成。免费档可继续修改、排序、撤销和本地导出。需要人工逐日安排时，¥199 内测覆盖一个城市、3–7 天、2–15 个地点，含一次范围内修改和一次双方约定日期的出发前复核；不代订、不持续监控。内测期限量接单，提交后确认档期。",
+    "passportReadyEn": "Your Go passport is ready. The free tier remains editable, sortable, undoable and locally exportable. The ¥199 manual itinerary beta covers one city, 3–7 days and 2–15 places with one in-scope revision and one pre-trip review on an agreed date; booking and continuous monitoring are excluded. Beta availability is limited and confirmed after submission."
   }
 }

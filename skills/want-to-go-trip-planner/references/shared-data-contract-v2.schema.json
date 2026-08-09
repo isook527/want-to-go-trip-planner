@@ -177,31 +177,95 @@
       "properties": {
         "id": {"type": "string", "minLength": 1},
         "destinationKey": {"type": "string", "minLength": 1},
-        "trigger": {"const": "pre_trip_on_demand"},
+        "trigger": {"enum": ["agreed_date_once", "pre_trip_on_demand_legacy"]},
+        "agreedReviewDate": {"type": "string", "format": "date"},
+        "agreementConfirmed": {"const": true},
+        "serviceContext": {"enum": ["manual_itinerary_beta", "standalone_non_public"]},
+        "tripRequestId": {"type": "string", "minLength": 1},
+        "legacyImported": {"type": "boolean"},
         "checkedAt": {"$ref": "#/$defs/timestamp"},
         "sourcePolicyVersion": {"const": "2.1.0"},
         "items": {"type": "array", "items": {"type": "object"}},
         "changes": {"type": "array", "items": {"type": "object"}},
         "summary": {"type": "string"}
       },
+      "allOf": [
+        {
+          "if": {"properties": {"trigger": {"const": "agreed_date_once"}}, "required": ["trigger"]},
+          "then": {"required": ["agreedReviewDate", "agreementConfirmed", "serviceContext"]}
+        },
+        {
+          "if": {"properties": {"trigger": {"const": "pre_trip_on_demand_legacy"}}, "required": ["trigger"]},
+          "then": {"required": ["legacyImported"]}
+        }
+      ],
       "additionalProperties": false
     },
     "tripRequest": {
       "type": "object",
-      "required": ["id", "offerId", "destinationKey", "status", "createdAt"],
+      "required": ["id", "offerId", "destinationKey", "status", "createdAt", "updatedAt"],
       "properties": {
         "id": {"type": "string", "minLength": 1},
         "offerId": {"enum": ["pre-trip-review", "manual-itinerary-beta"]},
         "destinationKey": {"type": "string", "minLength": 1},
-        "status": {"enum": ["draft", "submitted", "accepted", "declined", "completed"]},
+        "status": {"enum": ["draft", "submitted", "scope_schedule_confirmed", "customer_confirmed", "payment_instructions_sent", "payment_recorded", "in_delivery", "completed", "declined", "cancelled"]},
         "startDate": {"type": "string", "format": "date"},
         "days": {"type": "integer", "minimum": 1},
         "placeIds": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "agreedReviewDate": {"type": "string", "format": "date"},
+        "deliveryDueAt": {"$ref": "#/$defs/timestamp"},
+        "scopeConfirmedAt": {"$ref": "#/$defs/timestamp"},
+        "customerConfirmedAt": {"$ref": "#/$defs/timestamp"},
+        "paymentInstructionsSentAt": {"$ref": "#/$defs/timestamp"},
+        "paymentRecordedAt": {"$ref": "#/$defs/timestamp"},
+        "deliveryStartedAt": {"$ref": "#/$defs/timestamp"},
+        "legacyImported": {"type": "boolean"},
+        "legacyStatus": {"type": "string"},
         "contact": {"type": "string"},
         "notes": {"type": "string"},
         "createdAt": {"$ref": "#/$defs/timestamp"},
         "updatedAt": {"$ref": "#/$defs/timestamp"}
       },
+      "allOf": [
+        {
+          "if": {
+            "allOf": [
+              {"properties": {"offerId": {"const": "manual-itinerary-beta"}}, "required": ["offerId"]},
+              {"not": {"properties": {"legacyImported": {"const": true}}, "required": ["legacyImported"]}}
+            ]
+          },
+          "then": {
+            "properties": {
+              "days": {"type": "integer", "minimum": 3, "maximum": 7},
+              "placeIds": {"type": "array", "items": {"type": "string"}, "uniqueItems": true, "minItems": 2, "maxItems": 15}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"offerId": {"const": "pre-trip-review"}}, "required": ["offerId"]},
+          "then": {"required": ["legacyImported"]}
+        },
+        {
+          "if": {"properties": {"status": {"enum": ["scope_schedule_confirmed", "customer_confirmed", "payment_instructions_sent", "payment_recorded", "in_delivery", "completed"]}}, "required": ["status"]},
+          "then": {"required": ["agreedReviewDate", "deliveryDueAt", "scopeConfirmedAt"]}
+        },
+        {
+          "if": {"properties": {"status": {"enum": ["customer_confirmed", "payment_instructions_sent", "payment_recorded", "in_delivery", "completed"]}}, "required": ["status"]},
+          "then": {"required": ["customerConfirmedAt"]}
+        },
+        {
+          "if": {"properties": {"status": {"enum": ["payment_instructions_sent", "payment_recorded", "in_delivery", "completed"]}}, "required": ["status"]},
+          "then": {"required": ["paymentInstructionsSentAt"]}
+        },
+        {
+          "if": {"properties": {"status": {"enum": ["payment_recorded", "in_delivery", "completed"]}}, "required": ["status"]},
+          "then": {"required": ["paymentRecordedAt"]}
+        },
+        {
+          "if": {"properties": {"status": {"enum": ["in_delivery", "completed"]}}, "required": ["status"]},
+          "then": {"required": ["deliveryStartedAt"]}
+        }
+      ],
       "additionalProperties": false
     },
     "event": {
@@ -335,7 +399,11 @@
         {
           "id": "snapshot-bangkok-20260809",
           "destinationKey": "bangkok",
-          "trigger": "pre_trip_on_demand",
+          "trigger": "agreed_date_once",
+          "agreedReviewDate": "2026-08-09",
+          "agreementConfirmed": true,
+          "serviceContext": "manual_itinerary_beta",
+          "tripRequestId": "request-demo",
           "checkedAt": "2026-08-09T00:00:00Z",
           "sourcePolicyVersion": "2.1.0",
           "items": [{"placeId": "place-commons", "status": "checked"}],
@@ -345,10 +413,17 @@
       "tripRequests": [
         {
           "id": "request-demo",
-          "offerId": "pre-trip-review",
+          "offerId": "manual-itinerary-beta",
           "destinationKey": "bangkok",
-          "status": "draft",
+          "status": "completed",
           "startDate": "2026-09-01",
+          "agreedReviewDate": "2026-08-09",
+          "deliveryDueAt": "2026-08-20T09:00:00Z",
+          "scopeConfirmedAt": "2026-08-10T09:00:00Z",
+          "customerConfirmedAt": "2026-08-10T10:00:00Z",
+          "paymentInstructionsSentAt": "2026-08-10T11:00:00Z",
+          "paymentRecordedAt": "2026-08-11T09:00:00Z",
+          "deliveryStartedAt": "2026-08-11T10:00:00Z",
           "createdAt": "2026-08-09T00:00:00Z",
           "updatedAt": "2026-08-09T00:00:00Z"
         }

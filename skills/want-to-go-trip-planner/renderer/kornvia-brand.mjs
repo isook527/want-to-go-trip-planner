@@ -61,13 +61,11 @@ box-shadow:10px 10px 0 var(--ink)}
 border:5px solid var(--ink);border-radius:28px;padding:clamp(20px,4vw,32px);box-shadow:10px 12px 0 var(--ink)}
 .upgrade .kicker{color:var(--yellow);margin:0}
 .upgrade h2{font-size:clamp(36px,5vw,62px);max-width:760px}.upgrade-copy>p{font-size:18px;line-height:1.65;margin:0}
-.upgrade-price{display:flex;align-items:baseline;gap:10px}.upgrade-price strong{color:var(--yellow);
-font-size:clamp(54px,8vw,86px);line-height:.9;letter-spacing:-.06em}.upgrade-price span{font-weight:850}
-.upgrade-benefits{display:grid;gap:10px;margin:0;padding:0;list-style:none}
-.upgrade-benefits li{border:2px solid var(--ink);border-radius:16px;background:#fff;color:var(--ink);
-padding:12px 14px;font-weight:750}
-.manual-offer{border-top:3px solid var(--ink);padding-top:18px;display:grid;gap:10px}
-.manual-offer p{margin:0;line-height:1.55}.manual-price{font-size:22px;font-weight:950}
+.tier-list{display:grid;gap:14px}.tier-card{border:2px solid var(--ink);border-radius:20px;padding:20px;display:grid;gap:10px}
+.tier-card p{margin:0;line-height:1.55}.tier-name{font-size:20px;font-weight:950}.tier-price{font-size:clamp(38px,6vw,58px);
+font-weight:950;line-height:1;letter-spacing:-.04em}.tier-card ul{display:grid;gap:7px;margin:0;padding-left:20px}
+.recommended-tier{background:var(--yellow)}.recommended-label{font-size:12px;font-weight:950;letter-spacing:.12em}
+.availability{font-weight:900}.service-boundary{font-size:14px;color:#3f392f}
 .request-form{display:grid;gap:16px;background:var(--paper);color:var(--ink);border:5px solid var(--ink);
 border-radius:28px;padding:clamp(20px,4vw,32px);box-shadow:10px 12px 0 var(--ink)}
 .request-form h3{font-size:26px;line-height:1.2;margin:0}.request-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
@@ -77,7 +75,9 @@ background:#fff;color:var(--ink);font:inherit;padding:12px 13px}.request-form te
 .request-form .submit{border:3px solid var(--ink);border-radius:999px;background:#fff;color:#000;min-height:48px;
 font:inherit;font-size:17px;font-weight:950;padding:13px 18px;cursor:pointer;box-shadow:4px 4px 0 var(--ink)}
 .request-form .submit:active{transform:translate(2px,2px);box-shadow:2px 2px 0 var(--ink)}
-.fine-print,.fallback{font-size:13px;line-height:1.6;margin:0;color:#4f493f}.fallback a{color:var(--ink);font-weight:900}
+.request-notice{display:grid;gap:6px;border-top:2px solid var(--ink);padding-top:14px}.request-notice p,.payment-flow,.fallback{
+font-size:13px;line-height:1.6;margin:0;color:#4f493f}.payment-flow{font-weight:850;color:var(--ink)}
+.fallback a{color:var(--ink);font-weight:900}
 .honeypot{position:absolute!important;left:-10000px!important;width:1px!important;height:1px!important;overflow:hidden!important}
 a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{
 outline:4px solid var(--blue);outline-offset:3px}
