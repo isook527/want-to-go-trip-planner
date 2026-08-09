@@ -16,6 +16,7 @@ import sys
 import tempfile
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from urllib.parse import urlparse
 import urllib.request
 
@@ -24,7 +25,11 @@ MAX_HTML_BYTES = 2 * 1024 * 1024
 MAX_IMAGE_BYTES = 25 * 1024 * 1024
 MAX_VIDEO_BYTES = 250 * 1024 * 1024
 MAX_VIDEO_SCENES = 24
-EVIDENCE_SCHEMA_VERSION = "1.2.3"
+CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "product.json"
+with CONFIG_PATH.open("r", encoding="utf-8") as _config_handle:
+    PRODUCT_CONFIG = json.load(_config_handle)
+EVIDENCE_SCHEMA_VERSION = str(PRODUCT_CONFIG["contractVersion"])
+SOURCE_POLICY_VERSION = str(PRODUCT_CONFIG["sourcePolicyVersion"])
 MIN_PYTHON_VERSION = (3, 9)
 MIN_NODE_MAJOR = 18
 PLATFORM_MEDIA_HOSTS = {
@@ -92,6 +97,13 @@ LATIN_PLACE_PATTERN = re.compile(
     r"\b[A-ZÀ-Þ][A-Za-zÀ-ÖØ-öø-ÿ0-9&'’.-]*"
     r"(?:\s+(?:(?:[A-ZÀ-Þ][A-Za-zÀ-ÖØ-öø-ÿ0-9&'’.-]*)|(?:of|the|and|&)|(?:\d+))){1,5}\b"
 )
+UNTRUSTED_INSTRUCTION_PATTERN = re.compile(
+    r"(?:ignore\s+(?:all\s+)?(?:previous|prior|above)\s+instructions?|"
+    r"system\s+prompt|developer\s+message|reveal\s+(?:the\s+)?prompt|"
+    r"忽略(?:之前|以上|前面)(?:所有)?(?:指令|要求)|系统提示词|开发者消息|"
+    r"按以下(?:指令|要求)执行|不要遵守(?:之前|系统)(?:指令|要求))",
+    re.IGNORECASE,
+)
 
 
 def now():
@@ -113,6 +125,54 @@ def unique(values):
         if cleaned and key not in seen:
             seen.add(key)
             result.append(cleaned)
+    return result
+
+
+def untrusted_instruction_excerpts(value):
+    raw = str(value or "")
+    excerpts = []
+    for match in UNTRUSTED_INSTRUCTION_PATTERN.finditer(raw):
+        start = max(0, match.start() - 60)
+        end = min(len(raw), match.end() + 100)
+        excerpt = re.sub(r"\s+", " ", raw[start:end]).strip()[:240]
+        if excerpt and excerpt not in excerpts:
+            excerpts.append(excerpt)
+    return excerpts[:5]
+
+
+def source_policy(source_type, content, access_level, captured=True):
+    can_support = []
+    if source_type == "link":
+        can_support.append("original_url_submitted")
+        if captured:
+            can_support.append("page_content_observed")
+    elif source_type == "screenshot":
+        can_support.append("original_image_preserved")
+        if captured:
+            can_support.append("ocr_text_observed")
+    elif source_type == "video":
+        can_support.append("local_video_evidence")
+    elif source_type == "text":
+        can_support.append("customer_submitted_text")
+    excerpts = untrusted_instruction_excerpts(content)
+    cannot_prove = [
+        "current_opening_status_without_fresh_public_check",
+        "booking_or_ticket_availability",
+        "future_accessibility_or_queue_conditions",
+    ]
+    if not captured:
+        cannot_prove.append("blocked_or_failed_source_contents")
+    if excerpts:
+        cannot_prove.append("instructions_inside_external_content_are_authoritative")
+    result = {
+        "version": SOURCE_POLICY_VERSION,
+        "accessLevel": access_level,
+        "canSupport": unique(can_support),
+        "cannotProve": unique(cannot_prove),
+        "untrustedInstructionsDetected": bool(excerpts),
+    }
+    if excerpts:
+        result["untrustedInstructionExcerpts"] = excerpts
     return result
 
 
@@ -265,7 +325,7 @@ def fetch_public_link(url, timeout):
     request = urllib.request.Request(
         safe_url,
         headers={
-            "User-Agent": "WantToGoTripPlanner/0.3 (+public-evidence-only)",
+            "User-Agent": f"WantToGoTripPlanner/{PRODUCT_CONFIG['version']} (+public-evidence-only)",
             "Accept": "text/html,application/xhtml+xml",
         },
     )
@@ -439,6 +499,7 @@ def candidate_lines(text):
             2 <= len(line) <= 80
             and not NOISE_PATTERN.search(line)
             and not GENERIC_NAME_PATTERN.search(line)
+            and not UNTRUSTED_INSTRUCTION_PATTERN.search(line)
             and not line.startswith(("http://", "https://"))
             and re.search(r"[A-Za-z\u3400-\u9fff\u0e00-\u0e7f]", line)
         ):
@@ -528,7 +589,20 @@ def build_evidence(args, text, source_type, source_value, extra=None):
             "weatherSensitive": bool(WEATHER_PATTERN.search(text or "")),
         },
         "extractionWarnings": [],
+        "sourcePolicy": source_policy(
+            source_type,
+            text,
+            "public_readable" if source_type == "link"
+            else "local_only" if source_type in {"screenshot", "video", "saved_html"}
+            else "submitted",
+        ),
     }
+    if result["sourcePolicy"]["untrustedInstructionsDetected"]:
+        result["extractionWarnings"].append(
+            "External content contained instruction-like text. It was retained only as untrusted evidence and was not executed."
+            if args.output_locale == "en-US"
+            else "外部内容含指令式文本；仅作为不可信证据保留，不执行其中要求。"
+        )
     if source_type == "link":
         result["userOriginalUrl"] = source_value
     if not supplied_name:
@@ -848,6 +922,9 @@ def extract_one(args, source):
                     else "OCR 暂不可用，原图已保留；生成护照前需确认地点名称。"
                 ],
                 "ocrFailure": clean_text(error),
+                "sourcePolicy": source_policy(
+                    "screenshot", "", "local_only", captured=False
+                ),
             }
         result["localPath"] = os.path.abspath(value)
         result["displayPhoto"] = {"path": result["localPath"]}
@@ -941,6 +1018,8 @@ def preserve_screenshot_asset(evidence, source, output_path, bundle_id, storage_
         if os.path.realpath(original) != os.path.realpath(target_path):
             shutil.copy2(original, target_path)
     evidence["localPath"] = target_path
+    evidence["originalSha256"] = file_sha256(target_path)
+    evidence["originalImmutable"] = True
     evidence["assetStorage"] = "durable_copy" if target_path != original else "source_path"
     display_stem = safe_asset_token(source.get("id") or evidence.get("sourceId"))
     display_path = (
@@ -1140,6 +1219,12 @@ def batch_extract(args):
                     "status": "failed",
                     "reason": clean_text(error),
                     "mustRemainVisible": True,
+                    "sourcePolicy": source_policy(
+                        clean_text(source.get("type")).casefold(),
+                        clean_text(source.get("value")),
+                        "public_blocked" if clean_text(source.get("type")).casefold() == "link" else "unavailable",
+                        captured=False,
+                    ),
                 }
             )
     locale = manifest.get("outputLocale", args.output_locale)
@@ -1364,7 +1449,7 @@ def doctor_report(locale="zh-CN"):
         )
 
     return {
-        "schemaVersion": "kornvia-install-doctor-1.2.3",
+        "schemaVersion": PRODUCT_CONFIG["installDoctorMarker"],
         "platform": {
             "name": platform_name,
             "supported": platform_supported,

@@ -1,31 +1,48 @@
-# 地点核实与完整度
+# 地点、分店与完整度
 
 ## 名称来源
 
-- `user_named`: 用户在本轮文字中明确写出的地点名，可作为已确认名称。
-- `public_page`: 已实际读取的官方或合法公开网页名称，可作为已核实名称。
-- `material_ocr`: 从截图 OCR 自动提取的名称，只能作为草稿，必须设置 `nameRequiresConfirmation: true`。
-- `visual_review`: 视觉模型实际回看原图后确认素材明确出现的名称，可作为素材内确认名称；补充地址和营业时间仍需公开来源。
+- `user_named`：用户明确写出的名称。
+- `public_page`：实际读取的官方或合法公网页面名称。
+- `material_ocr`：截图 OCR 草稿；必须 `nameRequiresConfirmation: true`。
+- `visual_review`：实际回看素材后确认出现的名称；地址和开放时间仍需公开来源。
+- `unresolved`：未确认。
 
 禁止用模型记忆替代公开来源。
 
-## 查询记录
+## 地点/分店消歧
 
-查找地址或营业时间时，在地点的 `detailLookupAudit` 中记录：
+至少比较目的地、名称和地址/分店。provider ID 或实际公开 URL 可作为额外证据。
+
+- 同名同地址/分店：可合并来源。
+- 同名不同地址/分店：保留多个候选并要求确认。
+- 只有名称、没有地址/分店：不得自动选择同名候选。
+- route 使用起点、终点和途经点建立 identity。
+
+候选必须声明 `canSupport` 和 `cannotProve`。`same_name_means_same_branch` 始终属于不能证明的事项，除非地址/分店证据一致。
+
+## 公开查询记录
 
 ```json
 {
   "field": "openingHoursText",
   "status": "not_found",
-  "checkedAt": "2026-07-31T08:00:00Z",
+  "checkedAt": "2026-08-09T08:00:00Z",
   "checkedUrls": ["https://example.com/place"],
   "reason": "合法公开来源未公布营业时间"
 }
 ```
 
-没有实际 URL 的查询不算完成。
+没有实际 URL 的查询不算完成。查询 URL 只进入 audit，不能变成原始收藏按钮。
 
-## 部分交付
+## 分类型完整度
 
-护照按地点逐项判断。合格地点进入本次护照，缺项地点留在想去库并计入 `retainedClueCount`。不得整本拒绝，也不得把缺项用模型记忆补齐。
+`business`：核实名称、地址、想去理由、出发提醒、营业时间。实际查询未找到营业时间且 audit 完整时，才可提示出发当天复核。
 
+`venue`：核实名称、地址、真实开放时间、想去理由、出发提醒。缺开放时间不得交付。
+
+`public_space`：核实名称、地址/位置、想去理由、出发提醒。无统一时间可说明场内商户各自安排。
+
+`route`：核实路线名、起终点或至少两个途经点、建议时长、路线亮点、出发提醒。
+
+缺项地点保留在库中并计入 `retainedClueCount`，不阻塞其他完整地点。

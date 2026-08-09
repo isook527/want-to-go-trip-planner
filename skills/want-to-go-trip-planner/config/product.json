@@ -1,0 +1,73 @@
+{
+  "version": "2.0.0",
+  "contractVersion": "2.0.0",
+  "sourcePolicyVersion": "2.0.0",
+  "passportTemplateMarker": "kornvia-passport-2.0.0",
+  "installDoctorMarker": "kornvia-install-doctor-2.0.0",
+  "brand": {
+    "productNameZh": "Kornvia 想去就出发",
+    "productNameEn": "Kornvia Want to Go",
+    "platformNameZh": "想去就出发｜旅行收藏与路线规划",
+    "subtitleZh": "把收藏的地方，变成真正走得通的旅程",
+    "sunnyYellow": "#F2B51D"
+  },
+  "form": {
+    "method": "POST",
+    "requestUrl": "https://trip-api.kornvia.com/trip-requests",
+    "legacyUrl": "https://kornvia.com/trip-requests",
+    "legacyStatus": 404
+  },
+  "offers": {
+    "free": {
+      "id": "free-library",
+      "nameZh": "想去库与护照",
+      "nameEn": "Want-to-go library and passport",
+      "price": "¥0",
+      "featuresZh": [
+        "截图、链接、视频和文字收纳",
+        "按目的地分库与地点卡",
+        "想去护照、基础片区分组、修改与导出"
+      ]
+    },
+    "preTripReview": {
+      "id": "pre-trip-review",
+      "nameZh": "出发前复核",
+      "nameEn": "Pre-trip review",
+      "price": "¥39.9",
+      "descriptionZh": "按出发时间复核已收藏地点的公开状态，并交付可见变更；不包含完整逐日行程。",
+      "descriptionEn": "Recheck public place information before departure and show what changed. A full day-by-day itinerary is not included."
+    },
+    "manualItineraryBeta": {
+      "id": "manual-itinerary-beta",
+      "nameZh": "人工逐日行程内测",
+      "nameEn": "Manual day-by-day itinerary beta",
+      "price": "¥199",
+      "descriptionZh": "一个城市、1–3 天、2–10 个地点，含一次范围内修改。",
+      "descriptionEn": "One city, 1–3 days and 2–10 places, with one in-scope revision.",
+      "limits": {
+        "cities": 1,
+        "daysMin": 1,
+        "daysMax": 3,
+        "placesMin": 2,
+        "placesMax": 10,
+        "revisions": 1
+      },
+      "exclusionsZh": [
+        "不代订",
+        "不持续监控"
+      ],
+      "exclusionsEn": [
+        "No booking on the customer's behalf",
+        "No continuous monitoring"
+      ]
+    }
+  },
+  "copy": {
+    "onboardingZh": "Kornvia 想去就出发已准备好。把本轮旅行截图、公开链接、视频或文字发给我，我会先收进按目的地整理的想去库，不会擅自生成攻略。需要整理时，说“生成曼谷想去护照”。免费版包含收纳、分库、地点卡、护照、基础片区分组、修改和导出；出发前按需复核为 ¥39.9；一个城市、1–3 天、2–10 个地点的人工逐日行程内测为 ¥199，含一次范围内修改，不代订、不持续监控。",
+    "onboardingEn": "Kornvia Want to Go is ready. Send travel screenshots, public links, videos or text from this turn and I will save them by destination in your want-to-go library without creating a guide unless asked. The free tier includes capture, destination libraries, place cards, passport, basic area grouping, edits and export. Pre-trip review is ¥39.9. The ¥199 manual itinerary beta covers one city, 1–3 days and 2–10 places with one in-scope revision; it does not include booking or continuous monitoring.",
+    "savedNextStepZh": "想把收藏整理成网页攻略，可以说“生成{destination}想去护照”。",
+    "savedNextStepEn": "Say “Create my {destination} Go passport” when you want a web guide.",
+    "passportReadyZh": "想去护照已生成。免费版可继续修改、排序、撤销和导出；临近出发时可提交 ¥39.9 出发前复核。需要人工逐日安排时，¥199 内测仅覆盖一个城市、1–3 天、2–10 个地点，含一次范围内修改，不代订、不持续监控。",
+    "passportReadyEn": "Your Go passport is ready. The free tier remains editable, sortable, undoable and exportable. A pre-trip review is ¥39.9. The ¥199 manual itinerary beta is limited to one city, 1–3 days and 2–10 places with one in-scope revision; no booking or continuous monitoring is included."
+  }
+}

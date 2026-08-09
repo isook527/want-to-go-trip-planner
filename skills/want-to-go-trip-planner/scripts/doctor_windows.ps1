@@ -5,6 +5,8 @@ $utf8 = New-Object System.Text.UTF8Encoding($false)
 $OutputEncoding = $utf8
 $env:PYTHONUTF8 = "1"
 $env:PYTHONIOENCODING = "utf-8"
+$configPath = Join-Path (Split-Path $PSScriptRoot -Parent) "config\product.json"
+$productConfig = Get-Content -Raw -Encoding UTF8 $configPath | ConvertFrom-Json
 
 function Test-Executable([string]$Name) {
     return $null -ne (Get-Command $Name -ErrorAction SilentlyContinue)
@@ -40,7 +42,7 @@ if ($null -eq $pythonName) {
         [Convert]::FromBase64String("57y65bCRIFB5dGhvbiAzLjkg5oiW5pu06auY54mI5pys77yM5peg5rOV5ZCv5Yqo5oOz5Y675bqT5a6J6KOF5qOA5rWL44CC")
     )
     $result = [ordered]@{
-        schemaVersion = "kornvia-install-doctor-1.2.3"
+        schemaVersion = $productConfig.installDoctorMarker
         platform = [ordered]@{
             name = "Windows"
             supported = $true

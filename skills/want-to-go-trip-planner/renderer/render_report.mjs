@@ -6,14 +6,18 @@ import {
   KORNVIA_REPORT_CSS,
   LIM_PERSONA_DATA_URL,
   passportTitle,
+  PRODUCT_CONFIG,
   REPORT_TEMPLATE_VERSION,
 } from "./kornvia-brand.mjs";
 
 const MAX_INPUT_BYTES = 12 * 1024 * 1024;
 const MAX_PHOTO_BYTES = 16 * 1024 * 1024;
-const CTA_URL = "https://trip-api.kornvia.com/trip-requests";
+const CTA_URL = PRODUCT_CONFIG.form.requestUrl;
+const REVIEW_OFFER = PRODUCT_CONFIG.offers.preTripReview;
+const MANUAL_OFFER = PRODUCT_CONFIG.offers.manualItineraryBeta;
 const INTERNAL_PATTERN =
-  /(?:\.workbuddy|\/Users\/|localhost|127\.0\.0\.1|sourceRefs?|confidenceScore|detailLookupAudit|nameSource|hostChecks|paidPlanningReady|OCR|模型|宿主诊断|schemaVersion|paymentCode)/i;
+  /(?:\.workbuddy|\.claude|\/Users\/|\/mnt\/|localhost|127\.0\.0\.1|sourceRefs?|sourceIds?|mediaIds?|confidenceScore|detailLookupAudit|nameSource|hostChecks|paidPlanningReady|OCR|模型|宿主诊断|schemaVersion|paymentCode|operationId|tombstones?)/i;
+const SECRET_PATTERN = /(?:-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\b(?:sk|rk|pk)_[A-Za-z0-9]{20,}\b|\bBearer\s+[A-Za-z0-9._~+/=-]{16,})/i;
 
 function customerTextForScan(html) {
   return html
@@ -80,34 +84,38 @@ function requestCard(report, locale, placeCount) {
   fallbackUrl.searchParams.set("locale", locale);
   fallbackUrl.searchParams.set("placeCount", String(placeCount));
   return `<section class="upgrade">
-    <div class="upgrade-copy">
-      <p class="kicker">KORNVIA · DAY-BY-DAY</p>
-      <div class="upgrade-price"><strong>¥39.9</strong><span>${en ? "/ one trip" : "/ 一次行程"}</span></div>
-      <h2>${en ? "Turn these places into a trip you can follow day by day" : "把这些地点排成可以直接照着走的逐日行程"}</h2>
-      <p>${en
-        ? "Submit your dates and preferences here. Kornvia will confirm scope and delivery timing before sending payment instructions."
-        : "在护照里填写日期和偏好即可提交。Kornvia 会先确认范围与预计交付时间，再发送付款方式。"}</p>
+    <div class="upgrade-copy" aria-labelledby="paid-options-title">
+      <p class="kicker">KORNVIA · ${en ? "OPTIONAL SERVICES" : "按需服务"}</p>
+      <div class="upgrade-price"><strong>${escapeHtml(REVIEW_OFFER.price)}</strong><span>${en ? "/ pre-trip review" : "/ 出发前复核"}</span></div>
+      <h2 id="paid-options-title">${en ? "Recheck saved places before departure" : "临近出发，再复核一次"}</h2>
+      <p>${escapeHtml(en ? REVIEW_OFFER.descriptionEn : REVIEW_OFFER.descriptionZh)}</p>
       <ul class="upgrade-benefits">
-        <li>${en ? "Daily timing with suggested arrival and dwell time" : "逐日时间表：每站建议抵达与停留时间"}</li>
-        <li>${en ? "Opening-hour checks and obvious conflict avoidance" : "营业复核：排程前避开明显时间冲突"}</li>
-        <li>${en ? "Area-based routing with transit or taxi connections" : "交通衔接：按片区安排公共交通或打车"}</li>
-        <li>${en ? "Alternatives for closures, rain and queues" : "替换方案：应对关店、下雨和排队"}</li>
-        <li>${en ? "Mobile and printable page with one scoped adjustment" : "成品交付：手机可看、可打印，含一次范围内调整"}</li>
+        <li>${en ? "Shows a dated change diff against the last review" : "按复核时间交付变更 diff"}</li>
+        <li>${en ? "Does not promise a full day-by-day itinerary" : "不承诺完整逐日行程"}</li>
       </ul>
+      <div class="manual-offer">
+        <p class="manual-price">${escapeHtml(MANUAL_OFFER.price)} · ${escapeHtml(en ? MANUAL_OFFER.nameEn : MANUAL_OFFER.nameZh)}</p>
+        <p>${escapeHtml(en ? MANUAL_OFFER.descriptionEn : MANUAL_OFFER.descriptionZh)}</p>
+        <p class="fine-print">${escapeHtml(en ? MANUAL_OFFER.exclusionsEn.join(" · ") : MANUAL_OFFER.exclusionsZh.join(" · "))}</p>
+      </div>
     </div>
     <form class="request-form" action="${CTA_URL}" method="post" target="_blank" rel="noopener noreferrer" accept-charset="UTF-8" referrerpolicy="no-referrer">
       <input type="hidden" name="locale" value="${locale}">
       <input type="hidden" name="placeCount" value="${placeCount}">
       <div class="honeypot" aria-hidden="true"><label>Website<input name="website" tabindex="-1" autocomplete="off"></label></div>
-      <h3>${en ? "Send the itinerary request here" : "直接在这里提交行程需求"}</h3>
+      <h3>${en ? "Send a service request" : "提交服务需求"}</h3>
       <div class="request-grid">
+        <label class="full">${en ? "Service" : "服务类型"}<select name="offerId" required>
+          ${requestOption(REVIEW_OFFER.id, `${REVIEW_OFFER.price} · ${en ? REVIEW_OFFER.nameEn : REVIEW_OFFER.nameZh}`)}
+          ${requestOption(MANUAL_OFFER.id, `${MANUAL_OFFER.price} · ${en ? MANUAL_OFFER.nameEn : MANUAL_OFFER.nameZh}`)}
+        </select></label>
         <label>${en ? "Destination" : "目的地"}<input name="destination" value="${escapeHtml(destination)}" required maxlength="80" autocomplete="address-level1"></label>
         <label>${en ? "Start date" : "出发日期"}<input name="startDate" type="date" required></label>
         <label>${en ? "Trip length" : "旅行天数"}<select name="days" required>
           ${requestOption("", en ? "Select" : "请选择")}
-          ${requestOption("1-2", en ? "1–2 days" : "1–2 天")}
-          ${requestOption("3-5", en ? "3–5 days" : "3–5 天")}
-          ${requestOption("6-10", en ? "6–10 days" : "6–10 天")}
+          ${requestOption("1", en ? "1 day" : "1 天")}
+          ${requestOption("2", en ? "2 days" : "2 天")}
+          ${requestOption("3", en ? "3 days" : "3 天")}
         </select></label>
         <label>${en ? "Contact" : "联系方式"}<input name="contact" required maxlength="120" placeholder="${en ? "WeChat / phone / email" : "微信号 / 手机号 / 邮箱"}"></label>
         <label class="full">${en ? "Travel party and preferences" : "同行与偏好"}<textarea name="notes" maxlength="1200" placeholder="${en ? "Party size, walking limit, must-go places, diet or hotel area." : "人数、步行上限、必去地点、饮食禁忌或住宿区域。"}"></textarea></label>
@@ -128,8 +136,7 @@ function card(place, locale, baseDir) {
     ([place.routeStart, ...(place.waypoints || []), place.routeEnd].filter(Boolean).join(" → ")),
   );
   const links = publicLinks(place);
-  return `<article class="card">
-    ${photoFor(place, baseDir)}
+  return `<article class="card">${photoFor(place, baseDir)}
     <div class="body">
       <p class="eyebrow">${escapeHtml(clean(place.category || (en ? "SAVED PLACE" : "想去地点"), 60))}</p>
       <h2>${escapeHtml(clean(place.displayName || place.name, 120))}</h2>
@@ -160,12 +167,14 @@ function render(report, inputPath) {
     ? "Saved places, addresses, opening notes and practical reminders—ready in one guide."
     : "收藏的地点、地址、营业信息和出发提醒，都整理在这里。";
   const baseDir = path.dirname(inputPath);
+  const visitorMode = report.presentation?.visitorMode === true;
   return `<!doctype html><html lang="${en ? "en" : "zh-CN"}"><head><meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title>
   <style>${KORNVIA_REPORT_CSS}</style></head><body><main class="shell">
     <header class="hero"><p class="kicker">KORNVIA · ${en ? "WANT TO GO" : "想去就出发"}</p>
       <h1>${escapeHtml(title)}</h1><p>${escapeHtml(subtitle)}</p>
       <img class="lim" src="${LIM_PERSONA_DATA_URL}" alt="" aria-hidden="true"></header>
+    ${visitorMode ? `<aside class="retained">${en ? "Visitor view: customer-safe fields only." : "访客查看版：仅展示客户可见字段。"}</aside>` : ""}
     <section class="grid">${places.map((place) => card(place, locale, baseDir)).join("")}</section>
     ${retained ? `<aside class="retained">${en
       ? `${retained} more saved place clue${retained === 1 ? "" : "s"} remain in your library and can be added after verification.`
@@ -183,11 +192,10 @@ function main() {
   if (!Array.isArray(report.places) || report.places.length === 0) throw new Error("no deliverable places");
   const html = render(report, inputPath);
   if (INTERNAL_PATTERN.test(customerTextForScan(html))) throw new Error("customer output contains internal text");
+  if (SECRET_PATTERN.test(customerTextForScan(html))) throw new Error("customer output contains secret-like text");
   fs.writeFileSync(outputPath, html);
   const en = report.locale === "en-US";
-  process.stdout.write(en
-    ? "Your Go passport is ready. Open the HTML guide to view the saved places and next-step itinerary option.\n"
-    : "想去护照已生成。请直接打开 HTML 网页查看地点攻略和下一步完整行程入口。\n");
+  process.stdout.write(`${en ? PRODUCT_CONFIG.copy.passportReadyEn : PRODUCT_CONFIG.copy.passportReadyZh}\n`);
 }
 
 main();
