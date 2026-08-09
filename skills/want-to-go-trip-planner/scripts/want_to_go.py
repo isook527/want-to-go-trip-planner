@@ -629,7 +629,29 @@ def passport_missing_fields(place: dict[str, Any]) -> list[str]:
     return missing
 
 
-def customer_place(place: dict[str, Any], locale: str, content_depth: str = "standard") -> dict[str, Any]:
+def customer_photo(
+    place: dict[str, Any],
+    media_by_id: Optional[dict[str, dict[str, Any]]] = None,
+) -> dict[str, Any]:
+    existing = normalized_photo(place.get("displayPhoto") or place.get("photo"))
+    if existing:
+        return existing
+    media_id_value = text(place.get("displayMediaId"))
+    media = (media_by_id or {}).get(media_id_value)
+    if not isinstance(media, dict) or text(media.get("role")) != "display_crop":
+        return {}
+    path_value = text(media.get("path"))
+    if not path_value:
+        return {}
+    return normalized_photo({"path": path_value})
+
+
+def customer_place(
+    place: dict[str, Any],
+    locale: str,
+    content_depth: str = "standard",
+    media_by_id: Optional[dict[str, dict[str, Any]]] = None,
+) -> dict[str, Any]:
     place_type = normalized_place_type(place)
     hours = first(place, "openingHoursText", "openingHours")
     if not hours and place_type == "business" and audit_allows_hours_fallback(place):
@@ -653,7 +675,7 @@ def customer_place(place: dict[str, Any], locale: str, content_depth: str = "sta
         "routeEnd": first(place, "routeEnd"),
         "waypoints": place.get("waypoints") if isinstance(place.get("waypoints"), list) else [],
         "suggestedDuration": first(place, "suggestedDuration", "durationText"),
-        "photo": normalized_photo(place.get("displayPhoto") or place.get("photo")),
+        "photo": customer_photo(place, media_by_id),
         "originalSourceLinks": source_links({
             "originalSourceLinks": place.get("originalSourceLinks") or [],
         }),
@@ -1525,6 +1547,11 @@ def command_passport(args: argparse.Namespace) -> None:
     delivered: list[dict[str, Any]] = []
     retained: list[dict[str, Any]] = []
     with library_transaction(args.library) as library:
+        media_by_id = {
+            text(item.get("id")): item
+            for item in (library.get("media") or [])
+            if isinstance(item, dict) and text(item.get("id"))
+        }
         requested_key = destination_key_for_library(library, destination)
         operation_id = get_operation_id(args, f"passport:{requested_key}:{uuid.uuid4().hex[:12]}")
         candidates = sorted(
@@ -1544,7 +1571,9 @@ def command_passport(args: argparse.Namespace) -> None:
                     "missing": missing,
                 })
             else:
-                delivered.append(customer_place(place, args.locale, content_depth))
+                delivered.append(
+                    customer_place(place, args.locale, content_depth, media_by_id)
+                )
         if not delivered:
             labels = MISSING_FIELD_LABELS_EN if args.locale.startswith("en") else MISSING_FIELD_LABELS_ZH
             details = "; ".join(

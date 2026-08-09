@@ -223,7 +223,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
             "retainedClueCount": 2,
         }
         html = self.render(payload)
-        self.assertIn("kornvia-passport-2.1.0", html)
+        self.assertIn("kornvia-passport-2.1.1", html)
         self.assertIn(config["offers"]["free"]["price"], html)
         self.assertIn(config["offers"]["free"]["nameZh"], html)
         self.assertIn(config["offers"]["manualItineraryBeta"]["price"], html)
@@ -403,7 +403,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
                 "retainedClueCount": 0,
             }
         )
-        self.assertIn("kornvia-passport-2.1.0", html)
+        self.assertIn("kornvia-passport-2.1.1", html)
         self.assertIn("background:#F2B51D;color:var(--ink)", html)
         self.assertIn(".photo{aspect-ratio:4/3", html)
         self.assertIn("flex:0 0 auto", html)
@@ -1388,8 +1388,8 @@ class PublicSkillRegressionTests(unittest.TestCase):
         self.assertIn("$productConfig.installDoctorMarker", windows_doctor)
         self.assertIn("PRODUCT_CONFIG.passportTemplateMarker", renderer)
         config = json.loads((SKILL / "config" / "product.json").read_text(encoding="utf-8"))
-        self.assertEqual(config["installDoctorMarker"], "kornvia-install-doctor-2.1.0")
-        self.assertEqual(config["passportTemplateMarker"], "kornvia-passport-2.1.0")
+        self.assertEqual(config["installDoctorMarker"], "kornvia-install-doctor-2.1.1")
+        self.assertEqual(config["passportTemplateMarker"], "kornvia-passport-2.1.1")
 
     def test_38_ffmpeg_doctor_uses_supported_version_flag(self):
         missing = {"installed": False, "version": "", "ready": False}
@@ -1445,7 +1445,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
 
     def test_43_product_config_is_the_single_commercial_and_version_source(self):
         config = product_config()
-        self.assertEqual(config["version"], "2.1.0")
+        self.assertEqual(config["version"], "2.1.1")
         self.assertTrue(config["offers"])
         self.assertEqual(config["form"]["publicOfferId"], "manual-itinerary-beta")
         self.assertTrue(config["form"]["intentOnly"])
@@ -2337,6 +2337,47 @@ class PublicSkillRegressionTests(unittest.TestCase):
             self.assertEqual(place["verifiedName"], "Confirmed Name")
             self.assertEqual(place["nameSource"], "user_named")
             self.assertFalse(place["nameRequiresConfirmation"])
+
+    def test_77_passport_resolves_display_photo_from_v2_media_ledger(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            original = base / "platform.webp"
+            display = base / "platform.display.jpg"
+            library_path = base / "library.json"
+            passport_path = base / "passport.json"
+            Image.new("RGB", (80, 120), "blue").save(original, format="WEBP")
+            Image.new("RGB", (120, 90), "blue").save(display, format="JPEG")
+            library = W2G.empty_library()
+            library["bundles"] = [{
+                "bundleId": "platform-photo", "destination": "曼谷", "failures": [],
+                "evidence": [{
+                    "sourceId": "xhs-photo", "sourceType": "link", "destination": "曼谷",
+                    "userOriginalUrl": "https://www.xiaohongshu.com/explore/n?xsec_token=t",
+                    "platform": "xiaohongshu", "platformMediaFiles": [{
+                        "path": str(original), "sha256": W2G.sha256_if_file(original),
+                        "mimeType": "image/webp", "immutableOriginal": True,
+                        "displayPath": str(display), "displaySha256": W2G.sha256_if_file(display),
+                        "displayPhotoEligible": True, "displayPhotoScore": 0.98,
+                    }],
+                }],
+            }]
+            library["places"] = [complete_business(
+                id="photo-place", name="Photo Place", verifiedName="Photo Place",
+                nameSource="user_named", nameRequiresConfirmation=False,
+                sourceIds=["xhs-photo"], mediaIds=[], destinationKey="bangkok",
+                destinationStatus="confirmed", sortOrder=0,
+                createdAt="2026-08-10T00:00:00Z", updatedAt="2026-08-10T00:00:00Z",
+            )]
+            W2G.save_library(library_path, library)
+            with contextlib.redirect_stdout(io.StringIO()):
+                W2G.command_passport(argparse.Namespace(
+                    library=str(library_path), destination="曼谷", output=str(passport_path),
+                    locale="zh-CN", content_depth="standard", visitor_mode=True,
+                    operation_id="passport-media-ledger",
+                ))
+            payload = json.loads(passport_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["places"][0]["photo"]["path"], str(display))
+            self.assertNotEqual(payload["places"][0]["photo"]["path"], str(original))
 
 
 if __name__ == "__main__":
