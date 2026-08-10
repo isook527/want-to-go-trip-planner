@@ -9,6 +9,8 @@
 - 合格展示裁切图；无合格图片时不显示伪造主图
 - 未交付线索数量
 - visitor mode 提示、deep/standard/compact 中的客户可见字段
+- 安全核验摘要：当前状态、最近检查时间、适用期限、可公开来源、尚待确认事项和出发前动作
+- 分层执行风险：地点、路线和行程层的客户可见风险标签与建议动作
 - 来自唯一配置的两档结构：免费自己整理、黄色推荐的 ¥199 人工逐日行程内测
 - ¥199 范围：一个城市、3–7 天、2–15 个地点、一次范围内修改、一次双方约定日期的出发前复核
 - “内测期限量接单，提交后确认档期”以及不代订、不持续监控边界
@@ -19,7 +21,7 @@
 
 ## HTML 禁止展示
 
-- `schemaVersion / sourceIds / mediaIds / sourcePolicy / detailLookupAudit / events / tombstones`
+- `schemaVersion / sourceIds / mediaIds / sourcePolicy / detailLookupAudit / events / tombstones` 等原始内部审计结构
 - OCR、置信度、候选分数、错误堆栈、诊断和提示词注入扫描细节
 - 绝对路径、隐藏目录、localhost、宿主、模型、接口变量
 - 联系方式、Cookies、token、密钥、支付诊断
@@ -39,5 +41,6 @@
 5. 移动端单栏、键盘焦点、表单 label、图片 alt 和打印样式可用。
 6. 客户可见 HTML 只出现免费与 ¥199 两档；不出现 ¥39.9、¥399 或独立复核购买入口。
 7. 表单只提交服务意愿；没有静态收款码、自动扣款或提交即付款逻辑。
+8. 免费自填地点没有实际复核证据时只能显示“尚未人工复核”；只有带检查时间和公开来源的记录才能显示其他状态。
 
 收纳和护照完成回复从 `config/product.json.copy` 读取，不在本文重复维护。

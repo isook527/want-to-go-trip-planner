@@ -102,6 +102,68 @@ MISSING_FIELD_LABELS_EN = {
     "route": "route start/end or waypoints",
     "suggestedDuration": "suggested duration",
 }
+FACT_AUDIT_STATUSES = {"unverified", "verified", "conflict", "not_found", "stale"}
+FACT_AUDIT_PRIORITY = {
+    "verified": 0,
+    "unverified": 1,
+    "not_found": 2,
+    "stale": 3,
+    "conflict": 4,
+}
+FACT_STATUS_LABELS_ZH = {
+    "unverified": "尚未人工复核",
+    "verified": "来源一致",
+    "conflict": "来源存在冲突",
+    "not_found": "公开来源未查到",
+    "stale": "信息已过适用期",
+}
+FACT_STATUS_LABELS_EN = {
+    "unverified": "Not manually reviewed",
+    "verified": "Sources agree",
+    "conflict": "Sources conflict",
+    "not_found": "Not found in public sources",
+    "stale": "Information is out of date",
+}
+FACT_FIELD_LABELS_ZH = {
+    "verifiedName": "地点名称",
+    "address": "地址",
+    "positionText": "位置",
+    "openingHoursText": "营业时间",
+    "reservationPolicy": "预约政策",
+    "temporaryClosure": "临时关闭",
+    "routeConnection": "交通衔接",
+}
+FACT_FIELD_LABELS_EN = {
+    "verifiedName": "Place name",
+    "address": "Address",
+    "positionText": "Location",
+    "openingHoursText": "Opening hours",
+    "reservationPolicy": "Reservation policy",
+    "temporaryClosure": "Temporary closure",
+    "routeConnection": "Transport connection",
+}
+EXECUTION_RISK_TYPES = {
+    "last_mile", "reservation_ticket", "weather_sensitive",
+    "temporary_closure", "transfer_buffer",
+}
+EXECUTION_RISK_SCOPES = {"place", "route", "trip"}
+EXECUTION_RISK_LABELS_ZH = {
+    "last_mile": "最后一公里",
+    "reservation_ticket": "预约或购票",
+    "weather_sensitive": "天气敏感",
+    "temporary_closure": "临时关闭或节假日调整",
+    "transfer_buffer": "换乘与时间缓冲",
+}
+EXECUTION_RISK_LABELS_EN = {
+    "last_mile": "Last-mile access",
+    "reservation_ticket": "Reservation or ticket",
+    "weather_sensitive": "Weather-sensitive",
+    "temporary_closure": "Temporary closure or holiday change",
+    "transfer_buffer": "Transfer and time buffer",
+}
+EXECUTION_SCOPE_LABELS_ZH = {"place": "地点", "route": "路线", "trip": "行程"}
+EXECUTION_SCOPE_LABELS_EN = {"place": "Place", "route": "Route", "trip": "Trip"}
+AUDIT_SOURCE_KINDS = {"official", "reliable_public"}
 
 EDITABLE_PLACE_FIELDS = {
     "name", "verifiedName", "localName", "placeType", "category", "categoryLabel",
@@ -287,6 +349,26 @@ def migrate_library_data(raw: dict[str, Any]) -> tuple[dict[str, Any], list[str]
         place.setdefault("updatedAt", place["createdAt"])
         if "nameSource" in place:
             place["nameSource"] = normalized_name_source(place.get("nameSource"))
+        legacy_audits = place.get("detailLookupAudit")
+        if isinstance(legacy_audits, list):
+            normalized_audits = [
+                normalized
+                for item in legacy_audits
+                if (normalized := normalize_fact_audit(item))
+            ]
+            if normalized_audits != legacy_audits:
+                place["detailLookupAudit"] = normalized_audits
+                changes.append(f"normalized_fact_audits:{text(place.get('id'))}")
+        legacy_risks = place.get("executionRisks")
+        if isinstance(legacy_risks, list):
+            normalized_risks = [
+                normalized
+                for item in legacy_risks
+                if (normalized := normalize_execution_risk(item))
+            ]
+            if normalized_risks != legacy_risks:
+                place["executionRisks"] = normalized_risks
+                changes.append(f"normalized_execution_risks:{text(place.get('id'))}")
     for snapshot in data["verificationSnapshots"]:
         if not isinstance(snapshot, dict):
             continue
@@ -297,6 +379,43 @@ def migrate_library_data(raw: dict[str, Any]) -> tuple[dict[str, Any], list[str]
             snapshot["trigger"] = "pre_trip_on_demand_legacy"
             snapshot["legacyImported"] = True
             changes.append(f"legacy_verification_snapshot:{text(snapshot.get('id')) or 'unknown'}")
+        snapshot.setdefault("tripRisks", [])
+        normalized_trip_risks = [
+            normalized
+            for item in snapshot.get("tripRisks") or []
+            if (normalized := normalize_execution_risk(item, text(snapshot.get("checkedAt"))))
+        ]
+        if normalized_trip_risks != snapshot.get("tripRisks"):
+            snapshot["tripRisks"] = normalized_trip_risks
+            changes.append(f"normalized_trip_risks:{text(snapshot.get('id')) or 'unknown'}")
+        for item in snapshot.get("items") or []:
+            if not isinstance(item, dict):
+                continue
+            checked_default = text(snapshot.get("checkedAt"))
+            supplied_audits = item.get("factAudits") or item.get("detailLookupAudit") or []
+            normalized_audits = [
+                normalized
+                for audit in supplied_audits
+                if (normalized := normalize_fact_audit(audit, checked_default))
+            ]
+            if not normalized_audits and isinstance(item.get("facts"), dict):
+                normalized_audits = [
+                    {
+                        "field": field,
+                        "status": "unverified",
+                        "sources": [],
+                        "cannotProve": merge_unique(item.get("cannotProve") or []),
+                        "nextAction": "需要补充公开来源后再确认",
+                    }
+                    for field in item["facts"]
+                ]
+            item["factAudits"] = normalized_audits
+            item.pop("detailLookupAudit", None)
+            item["executionRisks"] = [
+                normalized
+                for risk in item.get("executionRisks") or []
+                if (normalized := normalize_execution_risk(risk, checked_default))
+            ]
     manual_limits = PRODUCT_CONFIG["offers"]["manualItineraryBeta"]["limits"]
     current_statuses = {"draft", *REQUEST_WORKFLOW_STAGES, "declined", "cancelled"}
     for request in data["tripRequests"]:
@@ -551,6 +670,186 @@ def source_links(place: dict[str, Any]) -> list[dict[str, str]]:
     return result
 
 
+def audit_sources(raw: Any, checked_urls: Any = None) -> list[dict[str, str]]:
+    candidates = raw if isinstance(raw, list) else []
+    if not candidates and isinstance(checked_urls, list):
+        candidates = [{"url": item, "kind": "reliable_public"} for item in checked_urls]
+    result: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in candidates:
+        if isinstance(item, str):
+            url, label, kind = text(item), "", "reliable_public"
+        elif isinstance(item, dict):
+            url = text(item.get("url") or item.get("href"))
+            label = text(item.get("label") or item.get("title"))
+            kind = text(item.get("kind")) or "reliable_public"
+        else:
+            continue
+        if not re.match(r"^https?://", url, flags=re.I) or url in seen:
+            continue
+        if kind not in AUDIT_SOURCE_KINDS:
+            continue
+        seen.add(url)
+        result.append({
+            "url": url,
+            "label": label or ("官方公开来源" if kind == "official" else "可信公开来源"),
+            "kind": kind,
+        })
+    return result
+
+
+def normalize_fact_audit(raw: Any, checked_at_default: str = "", strict: bool = False) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        if strict:
+            raise ValueError("fact audit must be an object")
+        return {}
+    field = text(raw.get("field"))
+    status = text(raw.get("status")) or "unverified"
+    checked_at = text(raw.get("checkedAt")) or checked_at_default
+    valid_until = text(raw.get("validUntil"))
+    sources = audit_sources(raw.get("sources"), raw.get("checkedUrls"))
+    cannot_prove = merge_unique(raw.get("cannotProve") or [])
+    next_action = text(raw.get("nextAction"))
+    if not field or status not in FACT_AUDIT_STATUSES:
+        if strict:
+            raise ValueError("fact audit needs field and supported status")
+        return {}
+    if status != "unverified" and (not checked_at or not sources):
+        if strict:
+            raise ValueError("reviewed fact audit needs checkedAt and an official or reliable public source")
+        return {}
+    result: dict[str, Any] = {
+        "field": field,
+        "status": status,
+        "sources": sources,
+        "cannotProve": cannot_prove,
+        "nextAction": next_action,
+    }
+    if checked_at:
+        result["checkedAt"] = checked_at
+    if valid_until:
+        result["validUntil"] = valid_until
+    return result
+
+
+def normalize_execution_risk(raw: Any, checked_at_default: str = "", strict: bool = False) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        if strict:
+            raise ValueError("execution risk must be an object")
+        return {}
+    risk_type = text(raw.get("type"))
+    scope = text(raw.get("scope"))
+    status = text(raw.get("status")) or "unverified"
+    checked_at = text(raw.get("checkedAt")) or checked_at_default
+    valid_until = text(raw.get("validUntil"))
+    sources = audit_sources(raw.get("sources"), raw.get("checkedUrls"))
+    cannot_prove = merge_unique(raw.get("cannotProve") or [])
+    next_action = text(raw.get("nextAction"))
+    summary = text(raw.get("summary"))
+    if risk_type not in EXECUTION_RISK_TYPES or scope not in EXECUTION_RISK_SCOPES or status not in FACT_AUDIT_STATUSES:
+        if strict:
+            raise ValueError("execution risk needs supported type, scope and status")
+        return {}
+    if status != "unverified" and (not checked_at or not sources):
+        if strict:
+            raise ValueError("reviewed execution risk needs checkedAt and an official or reliable public source")
+        return {}
+    result: dict[str, Any] = {
+        "type": risk_type,
+        "scope": scope,
+        "status": status,
+        "summary": summary,
+        "sources": sources,
+        "cannotProve": cannot_prove,
+        "nextAction": next_action,
+    }
+    if checked_at:
+        result["checkedAt"] = checked_at
+    if valid_until:
+        result["validUntil"] = valid_until
+    return result
+
+
+def customer_verification_summary(place: dict[str, Any], locale: str) -> dict[str, Any]:
+    en = locale.startswith("en")
+    labels = FACT_FIELD_LABELS_EN if en else FACT_FIELD_LABELS_ZH
+    status_labels = FACT_STATUS_LABELS_EN if en else FACT_STATUS_LABELS_ZH
+    audits = [
+        normalized
+        for item in (place.get("detailLookupAudit") or [])
+        if (normalized := normalize_fact_audit(item))
+    ]
+    if not audits:
+        return {
+            "status": "unverified",
+            "statusLabel": status_labels["unverified"],
+            "sources": [],
+            "pending": ["Public-source or manual review has not been completed." if en else "尚未完成人工或公开来源复核"],
+            "nextActions": ["Check hours, reservations and transport before departure." if en else "出发前核对营业、预约和交通信息"],
+            "items": [],
+        }
+    status = max((item["status"] for item in audits), key=lambda item: FACT_AUDIT_PRIORITY[item])
+    checked_values = sorted(item.get("checkedAt", "") for item in audits if item.get("checkedAt"))
+    valid_values = sorted(item.get("validUntil", "") for item in audits if item.get("validUntil"))
+    sources: list[dict[str, str]] = []
+    seen_sources: set[str] = set()
+    for audit in audits:
+        for source in audit["sources"]:
+            if source["url"] not in seen_sources:
+                seen_sources.add(source["url"])
+                sources.append(source)
+    pending = merge_unique([item for audit in audits for item in audit["cannotProve"]])
+    next_actions = merge_unique([audit["nextAction"] for audit in audits if audit["nextAction"]])
+    items = []
+    for audit in audits:
+        item = {
+            "label": labels.get(audit["field"], audit["field"]),
+            "status": audit["status"],
+            "statusLabel": status_labels[audit["status"]],
+            "sources": audit["sources"],
+            "pending": audit["cannotProve"],
+            "nextAction": audit["nextAction"],
+        }
+        if audit.get("checkedAt"):
+            item["checkedAt"] = audit["checkedAt"]
+        if audit.get("validUntil"):
+            item["validUntil"] = audit["validUntil"]
+        items.append(item)
+    result: dict[str, Any] = {
+        "status": status,
+        "statusLabel": status_labels[status],
+        "sources": sources,
+        "pending": pending,
+        "nextActions": next_actions,
+        "items": items,
+    }
+    if checked_values:
+        result["checkedAt"] = checked_values[-1]
+    if valid_values:
+        result["validUntil"] = valid_values[0]
+    return result
+
+
+def customer_execution_risks(raw: Any, locale: str) -> list[dict[str, Any]]:
+    en = locale.startswith("en")
+    type_labels = EXECUTION_RISK_LABELS_EN if en else EXECUTION_RISK_LABELS_ZH
+    scope_labels = EXECUTION_SCOPE_LABELS_EN if en else EXECUTION_SCOPE_LABELS_ZH
+    status_labels = FACT_STATUS_LABELS_EN if en else FACT_STATUS_LABELS_ZH
+    result: list[dict[str, Any]] = []
+    for item in raw if isinstance(raw, list) else []:
+        normalized = normalize_execution_risk(item)
+        if not normalized:
+            continue
+        customer = {
+            **normalized,
+            "label": type_labels[normalized["type"]],
+            "scopeLabel": scope_labels[normalized["scope"]],
+            "statusLabel": status_labels[normalized["status"]],
+        }
+        result.append(customer)
+    return result
+
+
 def audit_allows_hours_fallback(place: dict[str, Any]) -> bool:
     for item in place.get("detailLookupAudit") or []:
         if not isinstance(item, dict):
@@ -679,11 +978,14 @@ def customer_place(
         "originalSourceLinks": source_links({
             "originalSourceLinks": place.get("originalSourceLinks") or [],
         }),
+        "verificationSummary": customer_verification_summary(place, locale),
+        "executionRisks": customer_execution_risks(place.get("executionRisks"), locale),
     }
     if content_depth == "compact":
         allowed = {
             "id", "name", "placeType", "category", "address", "positionText",
             "openingHoursText", "visitTip", "photo", "originalSourceLinks",
+            "verificationSummary", "executionRisks",
         }
         result = {key: value for key, value in result.items() if key in allowed}
     elif content_depth == "deep":
@@ -1562,6 +1864,19 @@ def command_passport(args: argparse.Namespace) -> None:
             ],
             key=lambda place: (int(place.get("sortOrder", 0) or 0), text(place.get("name"))),
         )
+        latest_snapshot = next(
+            (
+                snapshot for snapshot in reversed(library.get("verificationSnapshots") or [])
+                if isinstance(snapshot, dict)
+                and text(snapshot.get("destinationKey")) == requested_key
+            ),
+            None,
+        )
+        snapshot_items = {
+            text(item.get("placeId")): item
+            for item in ((latest_snapshot or {}).get("items") or [])
+            if isinstance(item, dict) and text(item.get("placeId"))
+        }
         for place in candidates:
             missing = passport_missing_fields(place)
             if missing:
@@ -1571,8 +1886,13 @@ def command_passport(args: argparse.Namespace) -> None:
                     "missing": missing,
                 })
             else:
+                customer_input = copy.deepcopy(place)
+                reviewed = snapshot_items.get(text(place.get("id")))
+                if reviewed:
+                    customer_input["detailLookupAudit"] = copy.deepcopy(reviewed.get("factAudits") or [])
+                    customer_input["executionRisks"] = copy.deepcopy(reviewed.get("executionRisks") or [])
                 delivered.append(
-                    customer_place(place, args.locale, content_depth, media_by_id)
+                    customer_place(customer_input, args.locale, content_depth, media_by_id)
                 )
         if not delivered:
             labels = MISSING_FIELD_LABELS_EN if args.locale.startswith("en") else MISSING_FIELD_LABELS_ZH
@@ -1601,6 +1921,7 @@ def command_passport(args: argparse.Namespace) -> None:
                 "contentDepth": content_depth,
             },
             "places": delivered,
+            "tripRisks": customer_execution_risks((latest_snapshot or {}).get("tripRisks"), args.locale),
             "retainedClueCount": len(retained),
             "offers": {
                 "free": PRODUCT_CONFIG["offers"]["free"],
@@ -2223,6 +2544,44 @@ def command_review(args: argparse.Namespace) -> None:
         item.setdefault("canSupport", [])
         item.setdefault("cannotProve", [])
         item.setdefault("facts", {})
+        supplied_audits = item.get("factAudits") or item.get("detailLookupAudit") or []
+        if not isinstance(supplied_audits, list):
+            raise ValueError("factAudits must be an array")
+        fact_audits = [
+            normalize_fact_audit(audit, checked_at, strict=True)
+            for audit in supplied_audits
+        ]
+        if not fact_audits and isinstance(item.get("facts"), dict):
+            fact_audits = [
+                {
+                    "field": field,
+                    "status": "unverified",
+                    "sources": [],
+                    "cannotProve": merge_unique(item.get("cannotProve") or []),
+                    "nextAction": "需要补充公开来源后再确认",
+                }
+                for field in item["facts"]
+            ]
+        item["factAudits"] = fact_audits
+        item.pop("detailLookupAudit", None)
+        supplied_risks = item.get("executionRisks") or []
+        if not isinstance(supplied_risks, list):
+            raise ValueError("executionRisks must be an array")
+        item["executionRisks"] = [
+            normalize_execution_risk(risk, checked_at, strict=True)
+            for risk in supplied_risks
+        ]
+        if any(risk["scope"] == "trip" for risk in item["executionRisks"]):
+            raise ValueError("trip-scoped risks belong in tripRisks")
+    supplied_trip_risks = raw.get("tripRisks") or []
+    if not isinstance(supplied_trip_risks, list):
+        raise ValueError("tripRisks must be an array")
+    trip_risks = [
+        normalize_execution_risk(risk, checked_at, strict=True)
+        for risk in supplied_trip_risks
+    ]
+    if any(risk["scope"] != "trip" for risk in trip_risks):
+        raise ValueError("tripRisks only accepts trip-scoped risks")
     snapshot: dict[str, Any] = {}
     with library_transaction(args.library) as library:
         if service_context == "manual_itinerary_beta":
@@ -2263,6 +2622,7 @@ def command_review(args: argparse.Namespace) -> None:
             "checkedAt": checked_at,
             "sourcePolicyVersion": SOURCE_POLICY_VERSION,
             "items": copy.deepcopy(items),
+            "tripRisks": copy.deepcopy(trip_risks),
             "changes": changes,
             "summary": text(raw.get("summary")),
         }

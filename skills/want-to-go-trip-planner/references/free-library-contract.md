@@ -23,7 +23,7 @@
 - `place`：可编辑地点；`sourceIds` 指向证据，`mediaIds` 指向媒体，`sortOrder` 控制护照排序。
 - `source`：版本化证据账本；`submittedUrl` 只有顾客真实提交 URL 时存在。
 - `media`：原图与展示裁切分离；original 记录 SHA-256 且不可覆盖。
-- `verificationSnapshot`：一次约定日期复核；保存约定日、实际检查时间、服务上下文、事实、能力边界和 diff。它不是持续监控记录。
+- `verificationSnapshot`：一次约定日期复核；保存约定日、实际检查时间、统一事实状态、分层执行风险、能力边界和 diff。它不是持续监控记录。
 - `tripRequest`：本地需求记录和人工服务阶段；不等于已 POST、付款、接单或线上同步。状态必须按收款闭环顺序推进。
 
 `bundles` 仅用于 v1.2.3 无损迁移。官网和新调用方必须消费 `sources / media`，不得依赖 `bundles`。
@@ -38,13 +38,14 @@ Schema 的 `required` 是跨端最低必填；未列入 `required` 的属性为�
 - `tripRequest` 最低必填为 `id / offerId / destinationKey / status / createdAt / updatedAt`。人工服务范围确认后补 `agreedReviewDate / deliveryDueAt / scopeConfirmedAt`；之后依次记录顾客确认、单独发送付款方式、人工登记付款和开始交付时间。
 - 阶段顺序为 `draft → submitted → scope_schedule_confirmed → customer_confirmed → payment_instructions_sent → payment_recorded → in_delivery → completed`；`declined / cancelled` 是终止状态。不得跳级或倒退。
 - 新 `verificationSnapshot` 使用 `trigger: agreed_date_once`，并要求 `agreedReviewDate / agreementConfirmed / serviceContext`。人工服务内还要求 `tripRequestId`，且一个需求只能记录一次包含的复核。
+- `factAudits` 统一使用 `unverified / verified / conflict / not_found / stale`；除 `unverified` 外必须有 `checkedAt` 和官方或可信公开来源。地点/路线风险写入 `executionRisks`，行程天气风险写入 `tripRisks`。
 - `pre_trip_on_demand_legacy` 只标识迁移进来的旧快照，并要求 `legacyImported: true`。它不证明双方约定过日期，也不能被渲染为当前销售承诺。
 
 ## v1.2.3 迁移
 
 迁移步骤固定：
 
-1. `schemaVersion` 升到 `2.1.0`；补 `library id / revision`；2.0.0 来源无损迁移并补平台访问字段。
+1. `schemaVersion` 升到 `2.2.0`；补 `library id / revision`；2.0.0 来源无损迁移并补平台访问字段。
 2. `destinationCollections` 转为 `destinations`。
 3. `bundles.evidence/failures` 无损投影到版本化 `sources`。
 4. 截图/视频路径与 SHA-256 投影到 `media`；原始媒体为 immutable。
@@ -60,7 +61,7 @@ Schema 的 `required` 是跨端最低必填；未列入 `required` 的属性为�
 
 ```json
 {
-  "schemaVersion": "2.1.0",
+  "schemaVersion": "2.2.0",
   "id": "library-demo",
   "revision": 1,
   "createdAt": "2026-08-09T00:00:00Z",
@@ -82,13 +83,13 @@ Schema 的 `required` 是跨端最低必填；未列入 `required` 的属性为�
       "id": "source-shot-commons", "ledgerVersion": 1, "batchId": "batch-demo", "group": "place-commons",
       "type": "screenshot", "status": "captured", "destinationKey": "bangkok",
       "submittedAt": "2026-08-09T00:00:00Z", "mediaIds": ["media-shot-commons-original"],
-      "sourcePolicy": {"version": "2.1.0", "accessLevel": "local_only", "canSupport": ["screenshot_content"], "cannotProve": ["original_url"], "untrustedInstructionsDetected": false}
+      "sourcePolicy": {"version": "2.2.0", "accessLevel": "local_only", "canSupport": ["screenshot_content"], "cannotProve": ["original_url"], "untrustedInstructionsDetected": false}
     },
     {
       "id": "source-link-commons", "ledgerVersion": 1, "batchId": "batch-demo", "group": "place-commons",
       "type": "link", "status": "captured", "destinationKey": "bangkok",
       "submittedAt": "2026-08-09T00:00:00Z", "submittedUrl": "https://example.com/customer-submitted", "mediaIds": [],
-      "sourcePolicy": {"version": "2.1.0", "accessLevel": "public_readable", "canSupport": ["original_url", "public_page_facts"], "cannotProve": ["future_opening_status"], "untrustedInstructionsDetected": false}
+      "sourcePolicy": {"version": "2.2.0", "accessLevel": "public_readable", "canSupport": ["original_url", "public_page_facts"], "cannotProve": ["future_opening_status"], "untrustedInstructionsDetected": false}
     }
   ],
   "media": [{
@@ -100,8 +101,24 @@ Schema 的 `required` 是跨端最低必填；未列入 `required` 的属性为�
     "id": "snapshot-bangkok-20260809", "destinationKey": "bangkok", "trigger": "agreed_date_once",
     "agreedReviewDate": "2026-08-09", "agreementConfirmed": true,
     "serviceContext": "manual_itinerary_beta", "tripRequestId": "request-demo",
-    "checkedAt": "2026-08-09T00:00:00Z", "sourcePolicyVersion": "2.1.0",
-    "items": [{"placeId": "place-commons", "status": "checked"}], "changes": []
+    "checkedAt": "2026-08-09T00:00:00Z", "sourcePolicyVersion": "2.2.0",
+    "items": [{
+      "placeId": "place-commons", "accessLevel": "public_readable",
+      "canSupport": ["opening_hours_observed"], "cannotProve": ["future_queue"],
+      "facts": {"openingHoursText": "每日 08:00–01:00"},
+      "factAudits": [{
+        "field": "openingHoursText", "status": "verified", "checkedAt": "2026-08-09T00:00:00Z",
+        "sources": [{"url": "https://example.com/official-hours", "label": "商户公开营业信息", "kind": "official"}],
+        "cannotProve": ["future_queue"], "nextAction": "出发当天再次确认"
+      }],
+      "executionRisks": []
+    }],
+    "tripRisks": [{
+      "type": "weather_sensitive", "scope": "trip", "status": "unverified",
+      "summary": "临近出发日再查官方天气预警", "sources": [],
+      "cannotProve": ["future_weather"], "nextAction": "约定复核日查看官方预警"
+    }],
+    "changes": []
   }],
   "tripRequests": [{
     "id": "request-demo", "offerId": "manual-itinerary-beta", "destinationKey": "bangkok", "status": "completed",

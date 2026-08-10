@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://kornvia.com/contracts/want-to-go/2.1.0/schema.json",
+  "$id": "https://kornvia.com/contracts/want-to-go/2.2.0/schema.json",
   "title": "Kornvia Want-to-Go shared data contract",
-  "description": "Version 2.1.0 contract shared by the local Skill and read-only website consumers.",
+  "description": "Version 2.2.0 contract shared by the local Skill and read-only website consumers.",
   "type": "object",
   "required": [
     "schemaVersion",
@@ -20,7 +20,7 @@
     "tombstones"
   ],
   "properties": {
-    "schemaVersion": {"const": "2.1.0"},
+    "schemaVersion": {"const": "2.2.0"},
     "id": {"type": "string", "minLength": 1},
     "revision": {"type": "integer", "minimum": 0},
     "createdAt": {"$ref": "#/$defs/timestamp"},
@@ -48,7 +48,7 @@
       "type": "object",
       "required": ["version", "accessLevel", "canSupport", "cannotProve", "untrustedInstructionsDetected"],
       "properties": {
-        "version": {"const": "2.1.0"},
+        "version": {"const": "2.2.0"},
         "accessLevel": {"enum": ["submitted", "local_only", "public_readable", "public_blocked", "unavailable"]},
         "canSupport": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
         "cannotProve": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
@@ -67,6 +67,60 @@
         "checkedAt": {"$ref": "#/$defs/timestamp"},
         "capabilities": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
         "limitations": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+      },
+      "additionalProperties": false
+    },
+    "auditSource": {
+      "type": "object",
+      "required": ["url", "label", "kind"],
+      "properties": {
+        "url": {"type": "string", "format": "uri", "pattern": "^https?://"},
+        "label": {"type": "string", "minLength": 1},
+        "kind": {"enum": ["official", "reliable_public"]}
+      },
+      "additionalProperties": false
+    },
+    "factAudit": {
+      "type": "object",
+      "required": ["field", "status", "sources", "cannotProve", "nextAction"],
+      "properties": {
+        "field": {"type": "string", "minLength": 1},
+        "status": {"enum": ["unverified", "verified", "conflict", "not_found", "stale"]},
+        "checkedAt": {"$ref": "#/$defs/timestamp"},
+        "validUntil": {"$ref": "#/$defs/timestamp"},
+        "sources": {"type": "array", "items": {"$ref": "#/$defs/auditSource"}},
+        "cannotProve": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "nextAction": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "executionRisk": {
+      "type": "object",
+      "required": ["type", "scope", "status", "summary", "sources", "cannotProve", "nextAction"],
+      "properties": {
+        "type": {"enum": ["last_mile", "reservation_ticket", "weather_sensitive", "temporary_closure", "transfer_buffer"]},
+        "scope": {"enum": ["place", "route", "trip"]},
+        "status": {"enum": ["unverified", "verified", "conflict", "not_found", "stale"]},
+        "summary": {"type": "string"},
+        "checkedAt": {"$ref": "#/$defs/timestamp"},
+        "validUntil": {"$ref": "#/$defs/timestamp"},
+        "sources": {"type": "array", "items": {"$ref": "#/$defs/auditSource"}},
+        "cannotProve": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "nextAction": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "verificationItem": {
+      "type": "object",
+      "required": ["placeId", "accessLevel", "canSupport", "cannotProve", "facts", "factAudits", "executionRisks"],
+      "properties": {
+        "placeId": {"type": "string", "minLength": 1},
+        "accessLevel": {"enum": ["submitted", "local_only", "public_readable", "public_blocked", "unavailable"]},
+        "canSupport": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "cannotProve": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "facts": {"type": "object"},
+        "factAudits": {"type": "array", "items": {"$ref": "#/$defs/factAudit"}},
+        "executionRisks": {"type": "array", "items": {"$ref": "#/$defs/executionRisk"}}
       },
       "additionalProperties": false
     },
@@ -117,6 +171,8 @@
         "waypoints": {"type": "array", "items": {"type": "string"}},
         "suggestedDuration": {"type": "string"},
         "displayMediaId": {"type": "string"},
+        "detailLookupAudit": {"type": "array", "items": {"$ref": "#/$defs/factAudit"}},
+        "executionRisks": {"type": "array", "items": {"$ref": "#/$defs/executionRisk"}},
         "createdAt": {"$ref": "#/$defs/timestamp"},
         "updatedAt": {"$ref": "#/$defs/timestamp"}
       },
@@ -175,7 +231,7 @@
     },
     "verificationSnapshot": {
       "type": "object",
-      "required": ["id", "destinationKey", "trigger", "checkedAt", "sourcePolicyVersion", "items", "changes"],
+      "required": ["id", "destinationKey", "trigger", "checkedAt", "sourcePolicyVersion", "items", "tripRisks", "changes"],
       "properties": {
         "id": {"type": "string", "minLength": 1},
         "destinationKey": {"type": "string", "minLength": 1},
@@ -186,8 +242,9 @@
         "tripRequestId": {"type": "string", "minLength": 1},
         "legacyImported": {"type": "boolean"},
         "checkedAt": {"$ref": "#/$defs/timestamp"},
-        "sourcePolicyVersion": {"const": "2.1.0"},
-        "items": {"type": "array", "items": {"type": "object"}},
+        "sourcePolicyVersion": {"const": "2.2.0"},
+        "items": {"type": "array", "items": {"$ref": "#/$defs/verificationItem"}},
+        "tripRisks": {"type": "array", "items": {"$ref": "#/$defs/executionRisk"}},
         "changes": {"type": "array", "items": {"type": "object"}},
         "summary": {"type": "string"}
       },
@@ -312,7 +369,7 @@
   },
   "examples": [
     {
-      "schemaVersion": "2.1.0",
+      "schemaVersion": "2.2.0",
       "id": "library-demo",
       "revision": 1,
       "createdAt": "2026-08-09T00:00:00Z",
@@ -357,7 +414,7 @@
           "destinationKey": "bangkok",
           "submittedAt": "2026-08-09T00:00:00Z",
           "sourcePolicy": {
-            "version": "2.1.0",
+            "version": "2.2.0",
             "accessLevel": "local_only",
             "canSupport": ["screenshot_content"],
             "cannotProve": ["original_url"],
@@ -376,7 +433,7 @@
           "submittedAt": "2026-08-09T00:00:00Z",
           "submittedUrl": "https://example.com/customer-submitted",
           "sourcePolicy": {
-            "version": "2.1.0",
+            "version": "2.2.0",
             "accessLevel": "public_readable",
             "canSupport": ["original_url", "public_page_facts"],
             "cannotProve": ["future_opening_status"],
@@ -407,8 +464,44 @@
           "serviceContext": "manual_itinerary_beta",
           "tripRequestId": "request-demo",
           "checkedAt": "2026-08-09T00:00:00Z",
-          "sourcePolicyVersion": "2.1.0",
-          "items": [{"placeId": "place-commons", "status": "checked"}],
+          "sourcePolicyVersion": "2.2.0",
+          "items": [
+            {
+              "placeId": "place-commons",
+              "accessLevel": "public_readable",
+              "canSupport": ["opening_hours_observed"],
+              "cannotProve": ["future_queue"],
+              "facts": {"openingHoursText": "每日 08:00–01:00"},
+              "factAudits": [
+                {
+                  "field": "openingHoursText",
+                  "status": "verified",
+                  "checkedAt": "2026-08-09T00:00:00Z",
+                  "sources": [
+                    {
+                      "url": "https://example.com/official-hours",
+                      "label": "商户公开营业信息",
+                      "kind": "official"
+                    }
+                  ],
+                  "cannotProve": ["future_queue"],
+                  "nextAction": "出发当天再次确认"
+                }
+              ],
+              "executionRisks": []
+            }
+          ],
+          "tripRisks": [
+            {
+              "type": "weather_sensitive",
+              "scope": "trip",
+              "status": "unverified",
+              "summary": "临近出发日再查官方天气预警",
+              "sources": [],
+              "cannotProve": ["future_weather"],
+              "nextAction": "约定复核日查看官方预警"
+            }
+          ],
           "changes": [{"placeId": "place-commons", "field": "openingHoursText", "before": "", "after": "每日 08:00–01:00"}]
         }
       ],

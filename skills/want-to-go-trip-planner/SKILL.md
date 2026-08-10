@@ -138,6 +138,22 @@ Windows JSON 路径使用双反斜杠，例如 `C:\\Users\\Customer\\Pictures\\p
 
 原始链接必须位于对应地点卡下方。图片、视频或文字来源没有顾客 URL 时，不显示链接模块。
 
+### 事实状态与执行风险
+
+`detailLookupAudit` 继续作为内部事实审计字段。每项使用统一状态：
+
+- `unverified`：尚未人工或公开来源核验；
+- `verified`：实际来源一致；
+- `conflict`：不同来源冲突；
+- `not_found`：实际检查的公开来源没有给出该事实；
+- `stale`：曾经查到，但已经超过适用期限。
+
+除 `unverified` 外，状态必须同时记录 `checkedAt` 和至少一个 `official / reliable_public` 来源。按需要记录 `validUntil`、`cannotProve` 与 `nextAction`。禁止用模型记忆、推测或用户自填内容生成 `verified`。
+
+执行风险按层级保存：地点层使用最后一公里、预约购票、临时关闭；路线层使用换乘与时间缓冲；行程层使用天气敏感。风险项同样使用上述五种事实状态，不得把全部风险硬塞进每张地点卡。
+
+客户交付只展示安全投影 `verificationSummary / executionRisks / tripRisks`：当前状态、最近检查时间、适用期限、可公开来源、尚待确认事项和出发前动作。禁止暴露原始 `detailLookupAudit`、来源账本 ID 或内部诊断。
+
 ## 可编辑护照
 
 所有修改使用 `--operation-id` 获得幂等保障；相同 operation ID 不重复应用。
@@ -166,7 +182,7 @@ python3 scripts/want_to_go.py undo --library want-to-go.json --operation-id OP
 独立复核能力保留，但不在 Skill 客户交付中展示独立价格、销售入口或直接购买表达。对客的 ¥199 人工逐日行程内测包含一次双方约定日期的出发前复核；不得称为赠品。
 
 1. 双方先确认唯一复核日；checks 文件必须写入 `agreedReviewDate`、`agreementConfirmed: true` 和 `checkedAt`。
-2. 为每个地点记录 `accessLevel / canSupport / cannotProve / facts`。
+2. 为每个地点记录 `accessLevel / canSupport / cannotProve / facts / factAudits / executionRisks`；行程层天气风险写入 `tripRisks`。
 3. 用 `review` 保存 `verificationSnapshot`。
 4. 与同目的地上一快照生成字段级 diff；没有旧快照时当前事实全部视为新增。
 5. 人工服务内的复核填写 `serviceContext: manual_itinerary_beta` 与对应 `tripRequestId`；同一需求只记录一次。
@@ -198,7 +214,7 @@ python3 scripts/want_to_go.py repair --library want-to-go.json
 python3 scripts/want_to_go.py validate --library want-to-go.json
 python3 scripts/want_to_go.py export --library want-to-go.json --output export.json
 python3 scripts/want_to_go.py scan --path 想去护照.html --mode customer
-python3 scripts/want_to_go.py scan --path want-to-go-trip-planner-skill-2.1.2.zip --mode package
+python3 scripts/want_to_go.py scan --path want-to-go-trip-planner-skill-2.2.0.zip --mode package
 ```
 
 - `migrate --dry-run` 只报告；正式迁移原子写入并记录事件。v1.2.3 原始来源和媒体不得丢失。旧按需复核只能标为 `pre_trip_on_demand_legacy`，不得伪造双方约定日期；旧范围需求保留原值并标记 `legacyImported`。

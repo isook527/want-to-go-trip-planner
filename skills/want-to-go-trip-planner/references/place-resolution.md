@@ -28,12 +28,24 @@
   "field": "openingHoursText",
   "status": "not_found",
   "checkedAt": "2026-08-09T08:00:00Z",
-  "checkedUrls": ["https://example.com/place"],
-  "reason": "合法公开来源未公布营业时间"
+  "validUntil": "2026-08-16T08:00:00Z",
+  "sources": [
+    {
+      "url": "https://example.com/place",
+      "label": "商户公开页面",
+      "kind": "official"
+    }
+  ],
+  "cannotProve": ["future_opening_status"],
+  "nextAction": "出发当天再次确认是否临时调整"
 }
 ```
 
 没有实际 URL 的查询不算完成。查询 URL 只进入 audit，不能变成原始收藏按钮。
+
+状态只允许 `unverified / verified / conflict / not_found / stale`。`unverified` 可以没有查询时间和来源，其余状态必须同时有 `checkedAt` 和至少一个官方或可信公开来源。客户只看到安全摘要，不看到内部审计对象。
+
+执行风险分层：地点层记录最后一公里、预约购票和临时关闭；路线层记录换乘与时间缓冲；行程层记录天气敏感。每条风险都要写明当前状态、尚不能证明的部分和下一步动作。
 
 ## 分类型完整度
 
