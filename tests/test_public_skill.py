@@ -223,7 +223,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
             "retainedClueCount": 2,
         }
         html = self.render(payload)
-        self.assertIn("kornvia-passport-2.1.2", html)
+        self.assertIn("kornvia-passport-2.2.0", html)
         self.assertIn(config["offers"]["free"]["price"], html)
         self.assertNotIn("¥0", html)
         self.assertIn(config["offers"]["free"]["nameZh"], html)
@@ -407,7 +407,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
                 "retainedClueCount": 0,
             }
         )
-        self.assertIn("kornvia-passport-2.1.2", html)
+        self.assertIn("kornvia-passport-2.2.0", html)
         self.assertIn("background:#F2B51D;color:var(--ink)", html)
         self.assertIn(".photo{aspect-ratio:4/3", html)
         self.assertIn("flex:0 0 auto", html)
@@ -1124,7 +1124,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
             library = W2G.load_library(library_path)
             W2G.save_library(library_path, library)
             migrated = json.loads(library_path.read_text(encoding="utf-8"))
-            self.assertEqual(migrated["schemaVersion"], "2.1.0")
+            self.assertEqual(migrated["schemaVersion"], "2.2.0")
             self.assertEqual({item["key"] for item in migrated["destinations"]}, {"shanghai", "bangkok"})
             self.assertIn("sources", migrated)
             self.assertIn("media", migrated)
@@ -1392,8 +1392,8 @@ class PublicSkillRegressionTests(unittest.TestCase):
         self.assertIn("$productConfig.installDoctorMarker", windows_doctor)
         self.assertIn("PRODUCT_CONFIG.passportTemplateMarker", renderer)
         config = json.loads((SKILL / "config" / "product.json").read_text(encoding="utf-8"))
-        self.assertEqual(config["installDoctorMarker"], "kornvia-install-doctor-2.1.2")
-        self.assertEqual(config["passportTemplateMarker"], "kornvia-passport-2.1.2")
+        self.assertEqual(config["installDoctorMarker"], "kornvia-install-doctor-2.2.0")
+        self.assertEqual(config["passportTemplateMarker"], "kornvia-passport-2.2.0")
 
     def test_38_ffmpeg_doctor_uses_supported_version_flag(self):
         missing = {"installed": False, "version": "", "ready": False}
@@ -1449,7 +1449,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
 
     def test_43_product_config_is_the_single_commercial_and_version_source(self):
         config = product_config()
-        self.assertEqual(config["version"], "2.1.2")
+        self.assertEqual(config["version"], "2.2.0")
         self.assertTrue(config["offers"])
         self.assertEqual(config["form"]["publicOfferId"], "manual-itinerary-beta")
         self.assertTrue(config["form"]["intentOnly"])
@@ -1486,7 +1486,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
 
     def test_44_shared_schema_covers_every_required_v2_entity(self):
         schema = json.loads((SKILL / "references" / "shared-data-contract-v2.schema.json").read_text(encoding="utf-8"))
-        self.assertEqual(schema["properties"]["schemaVersion"]["const"], "2.1.0")
+        self.assertEqual(schema["properties"]["schemaVersion"]["const"], "2.2.0")
         for field in (
             "destinations", "places", "sources", "media",
             "verificationSnapshots", "tripRequests", "events", "tombstones",
@@ -1659,7 +1659,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
                 check=True, capture_output=True, text=True,
             )
             migrated = json.loads(library_path.read_text(encoding="utf-8"))
-            self.assertEqual(migrated["schemaVersion"], "2.1.0")
+            self.assertEqual(migrated["schemaVersion"], "2.2.0")
             self.assertEqual(migrated["sources"][0]["submittedUrl"], "https://example.com/legacy")
             self.assertEqual(migrated["sources"][0]["ledgerVersion"], 1)
             self.assertEqual(migrated["verificationSnapshots"][0]["trigger"], "pre_trip_on_demand_legacy")
@@ -2342,6 +2342,159 @@ class PublicSkillRegressionTests(unittest.TestCase):
             self.assertEqual(place["nameSource"], "user_named")
             self.assertFalse(place["nameRequiresConfirmation"])
 
+    def test_66_customer_summary_uses_canonical_fact_audits(self):
+        place = complete_business(
+            detailLookupAudit=[
+                {
+                    "field": "openingHoursText",
+                    "status": "verified",
+                    "checkedAt": "2026-08-11T08:00:00Z",
+                    "validUntil": "2026-08-18T08:00:00Z",
+                    "sources": [
+                        {
+                            "url": "https://example.com/official-hours",
+                            "label": "商户公开营业信息",
+                            "kind": "official",
+                        }
+                    ],
+                    "cannotProve": ["future_queue"],
+                    "nextAction": "出发当天再次确认是否临时调整",
+                }
+            ],
+        )
+        customer = W2G.customer_place(place, "zh-CN")
+        summary = customer["verificationSummary"]
+        self.assertEqual(summary["status"], "verified")
+        self.assertEqual(summary["checkedAt"], "2026-08-11T08:00:00Z")
+        self.assertEqual(summary["validUntil"], "2026-08-18T08:00:00Z")
+        self.assertEqual(summary["items"][0]["label"], "营业时间")
+        self.assertEqual(summary["sources"][0]["url"], "https://example.com/official-hours")
+        self.assertEqual(summary["pending"], ["future_queue"])
+        self.assertEqual(summary["nextActions"], ["出发当天再次确认是否临时调整"])
+        self.assertNotIn("detailLookupAudit", customer)
+
+    def test_67_free_place_defaults_to_unverified_customer_state(self):
+        customer = W2G.customer_place(complete_business(detailLookupAudit=[]), "zh-CN")
+        summary = customer["verificationSummary"]
+        self.assertEqual(summary["status"], "unverified")
+        self.assertEqual(summary["statusLabel"], "尚未人工复核")
+        self.assertEqual(summary["sources"], [])
+        self.assertTrue(summary["nextActions"])
+
+    def test_68_execution_risks_are_scoped_and_customer_safe(self):
+        place = complete_business(
+            executionRisks=[
+                {
+                    "type": "last_mile",
+                    "scope": "place",
+                    "status": "not_found",
+                    "summary": "公开接驳班次尚未查到",
+                    "checkedAt": "2026-08-11T08:00:00Z",
+                    "sources": [
+                        {
+                            "url": "https://example.com/transit-notice",
+                            "label": "当地客运公告",
+                            "kind": "official",
+                        }
+                    ],
+                    "cannotProve": ["future_timetable"],
+                    "nextAction": "在约定复核日电话确认",
+                }
+            ],
+        )
+        customer = W2G.customer_place(place, "zh-CN")
+        risk = customer["executionRisks"][0]
+        self.assertEqual(risk["type"], "last_mile")
+        self.assertEqual(risk["scope"], "place")
+        self.assertEqual(risk["label"], "最后一公里")
+        self.assertNotIn("checkedUrls", risk)
+        html = self.render({
+            "locale": "zh-CN",
+            "destination": "曼谷",
+            "places": [customer],
+            "tripRisks": [],
+            "retainedClueCount": 0,
+        })
+        self.assertIn("核验状态", html)
+        self.assertIn("最后一公里", html)
+        self.assertIn("公开接驳班次尚未查到", html)
+        self.assertNotIn("detailLookupAudit", html)
+
+    def test_69_review_requires_auditable_fact_records_and_keeps_trip_risks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            library_path = base / "library.json"
+            checks_path = base / "checks.json"
+            library = W2G.empty_library()
+            library["places"] = [complete_business(
+                destinationKey="bangkok",
+                destinationStatus="confirmed",
+                sourceIds=[],
+                mediaIds=[],
+                sortOrder=0,
+                createdAt="2026-08-11T00:00:00Z",
+                updatedAt="2026-08-11T00:00:00Z",
+            )]
+            W2G.save_library(library_path, library)
+            checks_path.write_text(json.dumps({
+                "checkedAt": "2026-08-11T08:00:00Z",
+                "agreedReviewDate": "2026-08-11",
+                "agreementConfirmed": True,
+                "serviceContext": "standalone_non_public",
+                "items": [{
+                    "placeId": "place-1",
+                    "accessLevel": "public_readable",
+                    "canSupport": ["opening_hours_observed"],
+                    "cannotProve": ["future_queue"],
+                    "facts": {"openingHoursText": "06:00–22:00"},
+                    "factAudits": [{
+                        "field": "openingHoursText",
+                        "status": "verified",
+                        "checkedAt": "2026-08-11T08:00:00Z",
+                        "sources": [{
+                            "url": "https://example.com/official-hours",
+                            "label": "商户公开营业信息",
+                            "kind": "official",
+                        }],
+                        "cannotProve": ["future_queue"],
+                        "nextAction": "出发当天再确认",
+                    }],
+                    "executionRisks": [],
+                }],
+                "tripRisks": [{
+                    "type": "weather_sensitive",
+                    "scope": "trip",
+                    "status": "unverified",
+                    "summary": "临近出发日再查官方天气预警",
+                    "sources": [],
+                    "cannotProve": ["future_weather"],
+                    "nextAction": "约定复核日查看官方预警",
+                }],
+            }, ensure_ascii=False), encoding="utf-8")
+            with contextlib.redirect_stdout(io.StringIO()):
+                W2G.command_review(argparse.Namespace(
+                    library=str(library_path), destination="曼谷", checks=str(checks_path),
+                    output="", operation_id="review-audit",
+                ))
+            saved = json.loads(library_path.read_text(encoding="utf-8"))
+            snapshot = saved["verificationSnapshots"][-1]
+            self.assertEqual(snapshot["items"][0]["factAudits"][0]["status"], "verified")
+            self.assertEqual(snapshot["tripRisks"][0]["scope"], "trip")
+
+    def test_70_contract_declares_audit_and_execution_risk_definitions(self):
+        schema = json.loads((SKILL / "references" / "shared-data-contract-v2.schema.json").read_text(encoding="utf-8"))
+        self.assertEqual(schema["properties"]["schemaVersion"]["const"], "2.2.0")
+        self.assertIn("factAudit", schema["$defs"])
+        self.assertIn("executionRisk", schema["$defs"])
+        self.assertIn("verificationItem", schema["$defs"])
+        self.assertEqual(
+            schema["$defs"]["factAudit"]["properties"]["status"]["enum"],
+            ["unverified", "verified", "conflict", "not_found", "stale"],
+        )
+        self.assertEqual(
+            set(schema["$defs"]["executionRisk"]["properties"]["type"]["enum"]),
+            {"last_mile", "reservation_ticket", "weather_sensitive", "temporary_closure", "transfer_buffer"},
+        )
     def test_77_passport_resolves_display_photo_from_v2_media_ledger(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)

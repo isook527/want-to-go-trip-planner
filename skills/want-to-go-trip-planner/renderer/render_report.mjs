@@ -108,6 +108,52 @@ function publicLinks(place) {
   return links;
 }
 
+function publicAuditLinks(items) {
+  const result = [];
+  const seen = new Set();
+  for (const item of Array.isArray(items) ? items : []) {
+    const url = item?.url;
+    if (!/^https?:\/\//i.test(url || "") || seen.has(url)) continue;
+    seen.add(url);
+    result.push({url, label: clean(item?.label, 100) || url});
+  }
+  return result;
+}
+
+function verificationPanel(place, en) {
+  const summary = place.verificationSummary || {};
+  const label = clean(summary.statusLabel, 80) || (en ? "Not manually reviewed" : "尚未人工复核");
+  const checkedAt = clean(summary.checkedAt, 40);
+  const validUntil = clean(summary.validUntil, 40);
+  const sources = publicAuditLinks(summary.sources);
+  const pending = Array.isArray(summary.pending) ? summary.pending.map((item) => clean(item, 180)).filter(Boolean) : [];
+  const actions = Array.isArray(summary.nextActions) ? summary.nextActions.map((item) => clean(item, 180)).filter(Boolean) : [];
+  return `<section class="verification" aria-label="${en ? "Verification status" : "核验状态"}">
+    <div class="verification-head"><strong>${en ? "Verification status" : "核验状态"}</strong><span>${escapeHtml(label)}</span></div>
+    ${checkedAt ? `<p><b>${en ? "Last checked" : "最近检查"}</b>${escapeHtml(checkedAt)}</p>` : ""}
+    ${validUntil ? `<p><b>${en ? "Valid until" : "适用期限"}</b>${escapeHtml(validUntil)}</p>` : ""}
+    ${sources.length ? `<div class="audit-sources"><b>${en ? "Public sources" : "公开来源"}</b>${sources.map((item) => `<a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.label)}</a>`).join("")}</div>` : ""}
+    ${pending.length ? `<div><b>${en ? "Still unproven" : "尚待确认"}</b><ul>${pending.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>` : ""}
+    ${actions.length ? `<div><b>${en ? "Before departure" : "出发前动作"}</b><ul>${actions.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>` : ""}
+  </section>`;
+}
+
+function riskPanel(risks, en, className = "risk-list") {
+  const safeRisks = Array.isArray(risks) ? risks : [];
+  if (!safeRisks.length) return "";
+  return `<section class="${className}" aria-label="${en ? "Execution risks" : "执行风险"}">
+    <strong>${en ? "Execution risks" : "执行风险"}</strong>
+    <div>${safeRisks.map((risk) => {
+      const sources = publicAuditLinks(risk.sources);
+      return `<article class="risk-item"><div><span>${escapeHtml(clean(risk.scopeLabel, 40))}</span><b>${escapeHtml(clean(risk.label, 80))}</b></div>
+        <p>${escapeHtml(clean(risk.summary, 220) || clean(risk.statusLabel, 80))}</p>
+        ${risk.nextAction ? `<p><strong>${en ? "Action" : "行动"}</strong>${escapeHtml(clean(risk.nextAction, 180))}</p>` : ""}
+        ${sources.length ? `<p class="risk-sources">${sources.map((item) => `<a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.label)}</a>`).join("")}</p>` : ""}
+      </article>`;
+    }).join("")}</div>
+  </section>`;
+}
+
 function requestOption(value, label) {
   return `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`;
 }
@@ -196,6 +242,8 @@ function card(place, locale, baseDir) {
         ${fact(en ? "Before you go" : "出发提醒", place.visitTip)}
       </dl>
       ${route ? `<div class="route"><strong>${en ? "Route" : "路线"}</strong><br>${escapeHtml(route)}</div>` : ""}
+      ${verificationPanel(place, en)}
+      ${riskPanel(place.executionRisks, en)}
       ${links.length ? `<div class="sources">${links.map((url) =>
         `<a class="button" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${en ? "Open original saved link" : "打开原始收藏链接"}</a>`
       ).join("")}</div>` : ""}
@@ -222,6 +270,7 @@ function render(report, inputPath) {
       <img class="lim" src="${LIM_PERSONA_DATA_URL}" alt="" aria-hidden="true"></header>
     ${visitorMode ? `<aside class="retained">${en ? "Visitor view: customer-safe fields only." : "访客查看版：仅展示客户可见字段。"}</aside>` : ""}
     <section class="grid">${places.map((place) => card(place, locale, baseDir)).join("")}</section>
+    ${riskPanel(report.tripRisks, en, "trip-risks")}
     ${retained ? `<aside class="retained">${en
       ? `${retained} more saved place clue${retained === 1 ? "" : "s"} remain in your library and can be added after verification.`
       : `另有 ${retained} 条地点线索已保留，核实后可补进下一版。`}</aside>` : ""}
