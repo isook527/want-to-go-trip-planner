@@ -18,11 +18,13 @@ import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
+import urllib.error
 import urllib.request
 
 
 MAX_HTML_BYTES = 2 * 1024 * 1024
+MAX_JSON_BYTES = 512 * 1024
 MAX_IMAGE_BYTES = 25 * 1024 * 1024
 MAX_VIDEO_BYTES = 250 * 1024 * 1024
 MAX_VIDEO_SCENES = 24
@@ -33,18 +35,17 @@ EVIDENCE_SCHEMA_VERSION = str(PRODUCT_CONFIG["contractVersion"])
 SOURCE_POLICY_VERSION = str(PRODUCT_CONFIG["sourcePolicyVersion"])
 MIN_PYTHON_VERSION = (3, 9)
 MIN_NODE_MAJOR = 18
-PLATFORM_MEDIA_HOSTS = {
-    "xiaohongshu.com",
-    "xhslink.com",
-    "xhslink.cn",
-    "douyin.com",
-    "iesdouyin.com",
-    "tiktok.com",
-    "instagram.com",
-    "youtube.com",
-    "youtu.be",
-}
 PLATFORM_IMPORTS = PRODUCT_CONFIG.get("platformImports") or {}
+PLATFORM_MEDIA_HOSTS = {
+    domain
+    for platform in {"xiaohongshu", "douyin", "tiktok", "instagram", "youtube"}
+    for domain in (PLATFORM_IMPORTS.get(platform) or {}).get("domains", [])
+}
+PUBLIC_METADATA_ENDPOINT_HOSTS = {
+    "www.tiktok.com",
+    "www.youtube.com",
+    "graph.facebook.com",
+}
 TIME_PATTERN = re.compile(
     r"(?:[01]?\d|2[0-3])[:：][0-5]\d\s*(?:-|–|—|至|~)\s*"
     r"(?:[01]?\d|2[0-3])[:：][0-5]\d"
@@ -577,6 +578,20 @@ def fetch_platform_link(url, source, args):
             "PLATFORM_SECURITY_CHECK: 马蜂窝公开正文触发安全检测；原链接已保留，请补截图、保存网页或粘贴文字",
             "PLATFORM_SECURITY_CHECK: Mafengwo blocked the public article with a security check. The original URL was retained; provide screenshots, a saved page or pasted text.",
         ))
+    if platform == "douyin":
+        return douyin_evidence(url, source, args)
+    if platform == "tiktok":
+        return oembed_evidence(
+            url, source, args, "tiktok", "https://www.tiktok.com/oembed",
+            "official_public_oembed",
+        )
+    if platform == "instagram":
+        return instagram_evidence(url, source, args)
+    if platform == "youtube":
+        return oembed_evidence(
+            url, source, args, "youtube", "https://www.youtube.com/oembed",
+            "public_oembed_metadata",
+        )
     document, final_url = fetch_public_link(url, args.timeout)
     parsed = parse_html_evidence(document)
     parsed["platform"] = platform
@@ -659,22 +674,43 @@ def public_http_url(value):
         }
     except socket.gaierror as error:
         raise ValueError(f"cannot resolve link host: {error}") from error
-    for address in addresses:
-        ip = ipaddress.ip_address(address)
-        if not ip.is_global:
-            raise ValueError("link host resolves to a non-public address")
+    global_addresses = {
+        address for address in addresses if ipaddress.ip_address(address).is_global
+    }
+    if not global_addresses:
+        raise ValueError("link host resolves to a non-public address")
+    if parsed.hostname.casefold() not in PUBLIC_METADATA_ENDPOINT_HOSTS:
+        for address in addresses:
+            if not ipaddress.ip_address(address).is_global:
+                raise ValueError("link host resolves to a non-public address")
     return parsed.geturl()
 
 
-def validate_connected_peer(response):
+def validate_connected_peer(response, request_url=""):
     file_pointer = getattr(response, "fp", None)
     raw = getattr(file_pointer, "raw", None)
     sock = getattr(raw, "_sock", None)
     if sock is None:
         return
     address = sock.getpeername()[0]
-    if not ipaddress.ip_address(address).is_global:
-        raise ValueError("link connected to a non-public address")
+    peer_ip = ipaddress.ip_address(address)
+    if peer_ip.is_global:
+        return
+    request_scheme = urlparse(clean_text(request_url)).scheme
+    proxy_url = clean_text(urllib.request.getproxies().get(request_scheme))
+    proxy_host = urlparse(proxy_url).hostname if proxy_url else ""
+    proxy_addresses = set()
+    if proxy_host:
+        try:
+            proxy_addresses = {
+                item[4][0]
+                for item in socket.getaddrinfo(proxy_host, None, type=socket.SOCK_STREAM)
+            }
+        except socket.gaierror:
+            proxy_addresses = set()
+    if address in proxy_addresses:
+        return
+    raise ValueError("link connected to a non-public address")
 
 
 class PublicRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -729,7 +765,7 @@ def fetch_public_link(url, timeout):
     opener = urllib.request.build_opener(PublicRedirectHandler())
     with opener.open(request, timeout=timeout) as response:
         public_http_url(response.geturl())
-        validate_connected_peer(response)
+        validate_connected_peer(response, safe_url)
         content_type = str(response.headers.get("content-type", "")).lower()
         if "html" not in content_type:
             raise ValueError("link did not return an HTML page")
@@ -738,6 +774,197 @@ def fetch_public_link(url, timeout):
             raise ValueError("link page exceeds 2 MB")
         charset = response.headers.get_content_charset() or "utf-8"
         return raw.decode(charset, errors="replace"), response.geturl()
+
+
+def fetch_public_json(url, timeout):
+    safe_url = public_http_url(url)
+    request = urllib.request.Request(
+        safe_url,
+        headers={
+            "User-Agent": f"WantToGoTripPlanner/{PRODUCT_CONFIG['version']} (+public-evidence-only)",
+            "Accept": "application/json",
+        },
+    )
+    opener = urllib.request.build_opener(PublicRedirectHandler())
+    with opener.open(request, timeout=timeout) as response:
+        public_http_url(response.geturl())
+        validate_connected_peer(response, safe_url)
+        raw = response.read(MAX_JSON_BYTES + 1)
+        if len(raw) > MAX_JSON_BYTES:
+            raise ValueError("public metadata response exceeds 512 KB")
+        charset = response.headers.get_content_charset() or "utf-8"
+        try:
+            payload = json.loads(raw.decode(charset, errors="replace"))
+        except json.JSONDecodeError as error:
+            raise ValueError("public metadata endpoint returned invalid JSON") from error
+        if not isinstance(payload, dict):
+            raise ValueError("public metadata endpoint returned an unsupported result")
+        return payload, response.geturl()
+
+
+def social_item_id(url, platform):
+    parsed = urlparse(clean_text(url))
+    path = parsed.path or ""
+    if platform == "tiktok":
+        match = re.search(r"/@[^/]+/video/(\d+)", path)
+    elif platform == "instagram":
+        match = re.search(r"/(?:p|reel|tv)/([A-Za-z0-9_-]+)", path)
+    elif platform == "youtube":
+        if host_matches(parsed.hostname, ["youtu.be"]):
+            match = re.match(r"/([A-Za-z0-9_-]{6,})", path)
+        else:
+            query_id = clean_text((parse_qs(parsed.query).get("v") or [""])[0])
+            match = re.search(r"/(?:shorts|embed)/([A-Za-z0-9_-]{6,})", path)
+            if query_id:
+                return query_id
+    else:
+        match = re.search(r"/video/(\d+)", path)
+    return clean_text(match.group(1)) if match else ""
+
+
+def oembed_evidence(url, source, args, platform, endpoint, mode):
+    locale = getattr(args, "output_locale", "zh-CN")
+    item_id = social_item_id(url, platform)
+    parsed_url = urlparse(url)
+    if platform == "tiktok" and not item_id and not host_matches(
+        parsed_url.hostname, ["vm.tiktok.com", "vt.tiktok.com"],
+    ):
+        raise ValueError(locale_text(
+            locale,
+            "PLATFORM_INPUT_INCOMPLETE: TikTok 原链接已保留；请提供公开视频链接，或补原视频、截图或文字",
+            "PLATFORM_INPUT_INCOMPLETE: The TikTok URL was retained. Provide a public video URL, or add the original video, screenshots or text.",
+        ))
+    if platform == "youtube" and not item_id:
+        raise ValueError(locale_text(
+            locale,
+            "PLATFORM_INPUT_INCOMPLETE: YouTube 原链接已保留；请提供公开视频或 Shorts 链接",
+            "PLATFORM_INPUT_INCOMPLETE: The YouTube URL was retained. Provide a public video or Shorts URL.",
+        ))
+    metadata_url = f"{endpoint}?{urlencode({'url': url})}"
+    if platform == "youtube":
+        metadata_url += "&format=json"
+    try:
+        payload, _ = fetch_public_json(metadata_url, args.timeout)
+    except (OSError, ValueError, urllib.error.HTTPError) as error:
+        raise ValueError(locale_text(
+            locale,
+            f"PLATFORM_CONTENT_UNAVAILABLE: {platform} 公开元数据不可用；原链接已保留，请补原视频、截图或文字",
+            f"PLATFORM_CONTENT_UNAVAILABLE: {platform} public metadata is unavailable. The original URL was retained; provide the original video, screenshots or text.",
+        )) from error
+    title = clean_text(payload.get("title"))
+    author = clean_text(payload.get("author_name"))
+    provider = clean_text(payload.get("provider_name"))
+    if not title and not clean_text(source.get("name") or getattr(args, "name", "")):
+        raise ValueError(locale_text(
+            locale,
+            "PLATFORM_INPUT_INCOMPLETE: Instagram 公开嵌入已确认，但未返回可用的地点文字；原链接已保留，请补地点名、截图、原视频或文字",
+            "PLATFORM_INPUT_INCOMPLETE: The public Instagram embed was confirmed but returned no usable place text. The original URL was retained; add the place name, screenshots, original video or text.",
+        ))
+    original = "\n".join(unique([title, author, provider]))
+    capabilities = ["public_embed_confirmed"]
+    if title:
+        capabilities.append("oembed_title_observed")
+    if author:
+        capabilities.append("oembed_author_observed")
+    thumbnail = clean_text(payload.get("thumbnail_url"))
+    if thumbnail:
+        capabilities.append("oembed_thumbnail_url_observed")
+    return {
+        "title": title,
+        "description": "",
+        "structuredNames": [],
+        "structuredAddresses": [],
+        "originalText": original,
+        "mediaType": "video" if platform in {"tiktok", "youtube"} else "page",
+        "publicVideoUrls": [],
+        "thumbnailUrl": thumbnail,
+        "platform": platform,
+        "platformItemId": item_id or clean_text(
+            payload.get("embed_product_id") or payload.get("author_unique_id")
+        ),
+        "pageContentObserved": False,
+        "platformMedia": True,
+        "platformAccess": {
+            "mode": mode,
+            "status": "readable",
+            "checkedAt": now(),
+            "capabilities": capabilities,
+            "limitations": [
+                "full_post_body_not_observed",
+                "video_binary_not_downloaded",
+                "captions_or_spoken_words_not_observed",
+                "place_identity_not_proven_by_platform_metadata",
+            ],
+        },
+    }
+
+
+def instagram_evidence(url, source, args):
+    parsed = urlparse(url)
+    if re.search(r"/stories/", parsed.path or "", re.IGNORECASE):
+        raise ValueError(locale_text(
+            getattr(args, "output_locale", "zh-CN"),
+            "PLATFORM_INPUT_INCOMPLETE: Instagram Story 不支持自动读取；原链接已保留，请补截图、原视频或文字",
+            "PLATFORM_INPUT_INCOMPLETE: Instagram Stories are not supported for automatic reading. The original URL was retained; provide screenshots, the original video or text.",
+        ))
+    if not social_item_id(url, "instagram"):
+        raise ValueError(locale_text(
+            getattr(args, "output_locale", "zh-CN"),
+            "PLATFORM_INPUT_INCOMPLETE: Instagram 原链接已保留；请提供公开帖子或 Reel 链接",
+            "PLATFORM_INPUT_INCOMPLETE: The Instagram URL was retained. Provide a public post or Reel URL.",
+        ))
+    return oembed_evidence(
+        url, source, args, "instagram",
+        "https://graph.facebook.com/v25.0/instagram_oembed",
+        "official_tokenless_oembed_with_local_fallback",
+    )
+
+
+def douyin_evidence(url, source, args):
+    locale = getattr(args, "output_locale", "zh-CN")
+    parsed_url = urlparse(url)
+    if not social_item_id(url, "douyin") and not host_matches(
+        parsed_url.hostname, ["v.douyin.com"],
+    ):
+        raise ValueError(locale_text(
+            locale,
+            "PLATFORM_INPUT_INCOMPLETE: 抖音原链接已保留；请提供具体公开作品链接或分享短链",
+            "PLATFORM_INPUT_INCOMPLETE: The Douyin URL was retained. Provide a specific public video URL or share short link.",
+        ))
+    try:
+        document, final_url = fetch_public_link(url, args.timeout)
+    except (OSError, ValueError, urllib.error.HTTPError) as error:
+        raise ValueError(locale_text(
+            locale,
+            "PLATFORM_SECURITY_CHECK: 抖音公开页本轮无法读取；原链接已保留，请补原视频、截图或文字",
+            "PLATFORM_SECURITY_CHECK: The public Douyin page could not be read in this run. The original URL was retained; provide the original video, screenshots or text.",
+        )) from error
+    parsed = parse_html_evidence(document)
+    if not parsed["originalText"]:
+        raise ValueError(locale_text(
+            locale,
+            "PLATFORM_CONTENT_UNAVAILABLE: 抖音页面未返回可用文字；原链接已保留，请补原视频、截图或文字",
+            "PLATFORM_CONTENT_UNAVAILABLE: The Douyin page returned no usable text. The original URL was retained; provide the original video, screenshots or text.",
+        ))
+    parsed.update({
+        "platform": "douyin",
+        "platformItemId": social_item_id(final_url, "douyin") or social_item_id(url, "douyin"),
+        "finalUrl": final_url,
+        "platformMedia": True,
+        "platformAccess": {
+            "mode": "public_share_page_with_local_fallback",
+            "status": "readable",
+            "checkedAt": now(),
+            "capabilities": ["public_page_metadata_observed"],
+            "limitations": [
+                "official_richer_video_api_requires_authorization",
+                "video_binary_not_downloaded",
+                "captions_or_spoken_words_not_proven_complete",
+                "place_identity_not_proven_by_platform_metadata",
+            ],
+        },
+    })
+    return parsed
 
 
 def parse_html_evidence(document):
@@ -1945,6 +2172,10 @@ def doctor_report(locale="zh-CN"):
                 "ctrip": bool(opencli["ready"]),
                 "wechatOfficial": bool(opencli["ready"]),
                 "mafengwo": "local_evidence_fallback",
+                "douyin": "public_page_with_local_fallback",
+                "tiktok": "official_public_oembed",
+                "instagram": "official_oembed_with_local_fallback",
+                "youtube": "public_oembed_metadata",
             },
         },
         "dependencies": {

@@ -42,7 +42,11 @@
 - 携程：详情页直接读取会被 432 阻挡；支持用顾客同时提供的地点名搜索，再用目的地与原链接内地点 ID 消歧，保存名称、城市、国家、坐标和 provider ID。只有链接、没有地点名或截图时必须返回待补充，不能猜。
 - 微信公众号：支持公开的 `mp.weixin.qq.com` 与搜狗微信文章 URL，经浏览器读取标题、正文与图片 URL；触发安全检测时保留原链接并请求保存页或截图。
 - 马蜂窝：当前公开文章实测触发安全检测。禁止宣称已读正文或绕过验证；保留顾客 URL，并通过截图、浏览器保存的 HTML 或粘贴文字完成收纳。
-- 抖音、大众点评、Instagram：本版只保证保留顾客实际链接与本地截图/视频证据，不宣称已实现平台正文读取。
+- 抖音：支持具体公开作品 URL 或 `v.douyin.com` 分享短链的只读公开页检查。成功时仅记录本轮实际观察到的页面元数据；失败时返回安全检测或内容不可用状态。抖音官方更丰富的视频数据接口需要权限与用户授权，本 Skill 不申请、不登录、不绕过。
+- TikTok：支持公开视频 URL 及官方公开 oEmbed，可读标题、作者和缩略图 URL。不下载视频，不把标题当成已确认地点；私密、删除或区域受限内容需补本地证据。
+- Instagram：支持公开 `/p/` 帖子与 `/reel/` Reel URL，使用 Meta 官方 tokenless oEmbed 确认可公开嵌入。该端点可能只返回嵌入 HTML，不保证返回标题、原图或视频文字；此时要求补地点名、截图、原视频或文字。Story 不支持。
+- YouTube：支持公开 watch、`youtu.be` 与 Shorts URL 的 oEmbed 元数据，可读标题、作者和缩略图 URL。不下载视频或自动抓取字幕；多地点视频必须补文字、原视频或带时间戳截图后再拆分。
+- 大众点评：仍只保留顾客实际链接与本地证据，本版不宣称已实现专用正文读取。
 - 官方网页、场馆官网：优先用于名称、地址和开放时间核实。
 
 ## 平台输入与结果状态
@@ -53,6 +57,10 @@
 | 携程 | 地点 URL + `source.name`，建议同时给 `destination` | provider ID、名称、城市/国家、坐标 | 无候选或多候选时返回明确状态，不选第一条冒充确认 |
 | 公众号 | 公开文章 URL | 标题、正文、图片 URL | `PLATFORM_SECURITY_CHECK` 或读取失败，保留 URL，补保存页/截图 |
 | 马蜂窝 | URL + 本地截图/保存页/文字 | URL 账本与本地证据 | 在线正文固定返回 `PLATFORM_SECURITY_CHECK`，等待人工安全检测或本地材料 |
+| 抖音 | 具体公开作品 URL 或分享短链 | 公开页标题/描述等本轮实际可见元数据 | 安全检测、无可用文字或非具体作品时保留 URL，补原视频/截图/文字 |
+| TikTok | 公开视频 URL | 官方 oEmbed 标题、作者、缩略图 URL | `PLATFORM_CONTENT_UNAVAILABLE` 或 `PLATFORM_INPUT_INCOMPLETE`，保留 URL，补本地证据 |
+| Instagram | 公开帖子或 Reel URL | 确认公开嵌入；端点实际返回时才记录标题/作者/缩略图 | Story、私密/禁止嵌入或无地点文字时保留 URL，补地点名/截图/原视频/文字 |
+| YouTube | 公开 watch、`youtu.be` 或 Shorts URL | oEmbed 标题、作者、缩略图 URL | 非具体视频或不可用时保留 URL，补文字/原视频/带时间戳截图 |
 
 这些状态属于内部来源账本，不能原样泄漏到客户 HTML。客户只看到地点事实、必要提醒，以及自己实际提交的原始链接。
 
@@ -66,6 +74,12 @@
 - Ctrip: require the submitted place URL plus a place name; use destination and the URL place ID for disambiguation. Never select the first ambiguous candidate.
 - WeChat Official Accounts: read only public article URLs. Retain the original URL and request a saved page or screenshots when a security check blocks access.
 - Mafengwo: online article bodies are treated as blocked in this release. Retain the URL and use screenshots, saved HTML or pasted text as local evidence.
-- Douyin, Dianping and Instagram: preserve customer-submitted URLs and local screenshots/videos only; do not claim full page-body extraction.
+- Douyin: accept a specific public video URL or `v.douyin.com` share link and inspect only the public page returned in the current run. If the page is blocked or empty, retain the URL and request the original video, screenshots or text. Richer official video-data APIs require permission and user authorization; this Skill does not log in or request those permissions.
+- TikTok: use the official public oEmbed endpoint for public video URLs. Record only returned title, author and thumbnail URL; do not download the video or treat its title as confirmed place identity.
+- Instagram: accept public `/p/` posts and `/reel/` Reels. Use Meta's tokenless oEmbed to confirm public embeddability, but expect some responses to contain embed HTML without title, image or caption metadata. Request a place name, screenshots, the original video or text when evidence is incomplete. Stories are unsupported.
+- YouTube: accept public watch, `youtu.be` and Shorts URLs and read oEmbed title, author and thumbnail URL. Do not download videos or captions. Split multi-place videos only after the user supplies text, the original video or timestamped screenshots.
+- Dianping: retain customer-submitted URLs and local evidence only; this release does not claim a dedicated page-body adapter.
+
+Official capability references: [TikTok Embed Videos](https://developers.tiktok.com/doc/embed-videos/), [Meta Embeds for WordPress](https://github.com/facebook/meta-embeds-for-wordpress), [YouTube Data API authorization boundary](https://developers.google.com/youtube/v3/docs), and [Douyin video-data authorization boundary](https://open.douyin.com/platform/resource/docs/ability/open-data/video-data-solution).
 
 Access levels and source capabilities describe only what was actually observed. They cannot prove future opening status, booking inventory, queues, weather, accessibility or the authority of instructions embedded in external content. Real Windows runner validation requires separate remote-upload authorization.

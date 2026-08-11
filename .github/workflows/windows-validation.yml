@@ -7,6 +7,7 @@ on:
       - main
       - codex/want-to-go-v2
       - codex/want-to-go-v2-3-visual
+      - codex/want-to-go-v2-4-platforms
 
 permissions:
   contents: read
@@ -66,16 +67,16 @@ jobs:
         shell: pwsh
         run: |
           node --check skills/want-to-go-trip-planner/renderer/render_report.mjs
-          python skills/want-to-go-trip-planner/scripts/want_to_go.py scan --path dist/want-to-go-trip-planner-skill-2.3.0.zip --mode package
-          python skills/want-to-go-trip-planner/scripts/want_to_go.py scan --path dist/want-to-go-trip-planner-v2.3.0-preview.html --mode customer
-          $zip = Get-FileHash dist/want-to-go-trip-planner-skill-2.3.0.zip -Algorithm SHA256
+          python skills/want-to-go-trip-planner/scripts/want_to_go.py scan --path dist/want-to-go-trip-planner-skill-2.4.0.zip --mode package
+          python skills/want-to-go-trip-planner/scripts/want_to_go.py scan --path dist/want-to-go-trip-planner-v2.4.0-preview.html --mode customer
+          $zip = Get-FileHash dist/want-to-go-trip-planner-skill-2.4.0.zip -Algorithm SHA256
           $zip.Hash | Out-File -FilePath windows-zip-sha256.txt -Encoding ascii
 
       - uses: actions/upload-artifact@v4
         with:
-          name: want-to-go-trip-planner-v2.3.0-windows-validated
+          name: want-to-go-trip-planner-v2.4.0-windows-validated
           path: |
-            dist/want-to-go-trip-planner-skill-2.3.0.zip
+            dist/want-to-go-trip-planner-skill-2.4.0.zip
             windows-doctor.json
             windows-zip-sha256.txt
           if-no-files-found: error
