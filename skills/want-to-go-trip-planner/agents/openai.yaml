@@ -1,4 +1,4 @@
 interface:
   display_name: "Want to Go｜想去就出发"
-  short_description: "Organize travel saves by destination｜按目的地整理旅行收藏"
-  default_prompt: "Use $want-to-go-trip-planner to organize these travel screenshots, public links, videos or notes by destination. Detect my language automatically and keep the whole workflow and passport in that language."
+  short_description: "Organize social travel saves｜整理中外社媒旅行收藏"
+  default_prompt: "Use $want-to-go-trip-planner to organize these Xiaohongshu, Douyin, TikTok, Instagram, YouTube or other travel saves by destination. Detect my language automatically and keep the workflow and passport in that language."
