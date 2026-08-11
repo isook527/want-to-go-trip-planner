@@ -58,3 +58,12 @@
 `route`：核实路线名、起终点或至少两个途经点、建议时长、路线亮点、出发提醒。
 
 缺项地点保留在库中并计入 `retainedClueCount`，不阻塞其他完整地点。
+
+## English resolution rules
+
+- Treat `user_named`, an actually read public page and confirmed visual evidence as distinct name sources. OCR remains a draft and requires confirmation. Never replace a public-source check with model memory.
+- Compare destination, name and address/branch before merging. Same name plus different address means separate candidates; same name without branch evidence must remain unresolved.
+- A lookup is complete only when its audit contains the actual public URL. Lookup URLs stay in the audit and never become customer “original saved link” buttons.
+- Use only `unverified`, `verified`, `conflict`, `not_found` or `stale`. Every status except `unverified` requires `checkedAt` and at least one official or reliable public source.
+- Business places require confirmed name, address, opening hours, reason and departure reminder. Venues require real opening information. Public spaces may state that individual tenants keep their own hours. Routes require a start/end or at least two waypoints, duration, highlight and departure reminder.
+- Keep incomplete places in the library and count them in `retainedClueCount`; do not block complete places.

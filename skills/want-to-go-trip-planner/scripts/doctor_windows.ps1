@@ -43,9 +43,13 @@ if ($null -eq $pythonName -and (Test-Executable "python3")) {
 }
 
 if ($null -eq $pythonName) {
-    $missingPythonMessage = [Text.Encoding]::UTF8.GetString(
-        [Convert]::FromBase64String("57y65bCRIFB5dGhvbiAzLjkg5oiW5pu06auY54mI5pys77yM5peg5rOV5ZCv5Yqo5oOz5Y675bqT5a6J6KOF5qOA5rWL44CC")
-    )
+    if ($Locale -eq "en-US") {
+        $missingPythonMessage = "Python 3.9 or later is required. The Want-to-go library installation check cannot start."
+    } else {
+        $missingPythonMessage = [Text.Encoding]::UTF8.GetString(
+            [Convert]::FromBase64String("57y65bCRIFB5dGhvbiAzLjkg5oiW5pu06auY54mI5pys77yM5peg5rOV5ZCv5Yqo5oOz5Y675bqT5a6J6KOF5qOA5rWL44CC")
+        )
+    }
     $result = [ordered]@{
         schemaVersion = $productConfig.installDoctorMarker
         platform = [ordered]@{

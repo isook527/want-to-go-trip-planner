@@ -1,11 +1,53 @@
 ---
 name: want-to-go-trip-planner
-description: 把本轮旅行截图、顾客实际提交的公开链接、视频和文字收进长期本地想去库，按目的地分库并维护可编辑的地点卡与 Kornvia 想去护照；支持来源证据、原图保护、地点/分店消歧、迁移修复、撤销恢复、出发前复核和导出。适用于“存一下”“收进想去库”“整理收藏”“改一下地点卡”“撤销”“出发前复核”“生成曼谷想去护照”等请求。
+description: 把本轮旅行截图、顾客实际提交的公开链接、视频和文字收进长期本地想去库，按目的地分库并维护可编辑地点卡与 Kornvia 想去护照；支持中英文输出、来源证据、原图保护、地点/分店消歧、迁移修复、撤销恢复、约定日期复核和导出。Use for saving travel screenshots, user-submitted public links, videos or text by destination; maintaining editable place cards and bilingual Want-to-go passports; correcting, undoing, reviewing or exporting a travel library. Triggers include “存一下”“生成曼谷想去护照”, “save this place”, “organize my travel saves”, “create my Bangkok passport”, “edit this place card” and “review before departure”.
 ---
 
 # 想去就出发
 
 把零散旅行灵感收进一个可持续维护的本地想去库。默认只收纳；只有用户明确要求时才生成护照。出发前复核只在双方约定的复核日执行一次并交付变化清单。
+
+## Language / 语言
+
+- Follow an explicit `zh-CN` or `en-US` request. Otherwise reply in the language used by the user; when unclear, default to `zh-CN`.
+- Set manifest `outputLocale` and command `--locale` consistently. `en-US` localizes onboarding, doctor output, collection responses, passport labels, verification/risk summaries, offer copy and the request form.
+- Keep local place names in their original script. Translate descriptive fields only when the user asks for an English deliverable or provides English facts; never translate by inventing addresses, opening hours or verification results.
+- Keep machine fields, IDs, source-policy values and schema enums unchanged across languages. A Chinese and English passport must remain compatible with the same v2 library.
+- 用户明确要求英文时使用 `en-US`；未指定时跟随用户语言。英文交付保留当地名称原文，事实字段不得靠猜测翻译。
+
+English quick start:
+
+```bash
+python3 scripts/extract_evidence.py doctor --locale en-US
+python3 scripts/want_to_go.py onboarding --locale en-US
+python3 scripts/extract_evidence.py batch --manifest manifest.json --output evidence.json --output-locale en-US
+python3 scripts/want_to_go.py ingest --library want-to-go.json --evidence evidence.json
+python3 scripts/want_to_go.py passport --library want-to-go.json --destination Bangkok --output passport.json --locale en-US --content-depth standard
+node renderer/render_report.mjs passport.json want-to-go-passport.html
+python3 scripts/want_to_go.py scan --path want-to-go-passport.html --mode customer
+```
+
+Windows PowerShell:
+
+```powershell
+$env:PYTHONUTF8 = "1"
+$env:PYTHONIOENCODING = "utf-8"
+powershell -ExecutionPolicy Bypass -File .\scripts\doctor_windows.ps1 -Locale en-US
+py scripts\want_to_go.py onboarding --locale en-US
+```
+
+English manifest:
+
+```json
+{
+  "bundleId": "bangkok-saves-001",
+  "outputLocale": "en-US",
+  "storageMode": "durable",
+  "sources": [
+    {"id": "link-1", "group": "place-1", "destination": "Bangkok", "type": "link", "value": "https://example.com/customer-submitted", "name": "Example Place"}
+  ]
+}
+```
 
 ## 先读取唯一契约与配置
 

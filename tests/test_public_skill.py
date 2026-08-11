@@ -231,7 +231,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
         self.assertIn(config["offers"]["free"]["nameZh"], html)
         self.assertIn(config["offers"]["manualItineraryBeta"]["price"], html)
         self.assertIn(config["offers"]["manualItineraryBeta"]["nameZh"], html)
-        self.assertNotIn(config["offers"]["preTripReview"]["price"], html)
+        self.assertNotIn("pre-trip-review", html)
         self.assertIn('name="offerId" value="manual-itinerary-beta"', html)
         self.assertNotIn('<select name="offerId"', html)
         self.assertIn(config["form"]["requestUrl"], html)
@@ -277,9 +277,10 @@ class PublicSkillRegressionTests(unittest.TestCase):
         ):
             self.assertNotIn(banned, customer_text)
         for offer in product_config()["offers"].values():
-            self.assertNotIn(f'{offer["price"]} 完整逐日行程', customer_text)
-        self.assertNotIn("¥39.9", customer_text)
-        self.assertNotIn("正式价 ¥399", customer_text)
+            if offer.get("price"):
+                self.assertNotIn(f'{offer["price"]} 完整逐日行程', customer_text)
+        self.assertNotIn("pre-trip-review", customer_text)
+        self.assertNotIn("正式价", customer_text)
         self.assertNotIn("固定每周限单", customer_text)
 
     def test_13_display_image_finds_photo_rich_region_and_makes_four_three_crop(self):
@@ -1442,6 +1443,8 @@ class PublicSkillRegressionTests(unittest.TestCase):
         self.assertIn('$env:PYTHONUTF8 = "1"', text)
         self.assertIn('$env:PYTHONIOENCODING = "utf-8"', text)
         self.assertIn("[Console]::OutputEncoding = $utf8", text)
+        self.assertIn('if ($Locale -eq "en-US")', text)
+        self.assertIn("Python 3.9 or later is required", text)
 
     def test_41_windows_powershell_prefers_active_python_environment(self):
         text = (SKILL / "scripts" / "doctor_windows.ps1").read_text(encoding="ascii")
@@ -1468,16 +1471,21 @@ class PublicSkillRegressionTests(unittest.TestCase):
         self.assertFalse(config["paymentWorkflow"]["publicStaticPaymentCode"])
         offer_ids = []
         for offer in config["offers"].values():
-            for required in ("id", "nameZh", "nameEn", "price"):
+            for required in ("id", "nameZh", "nameEn"):
                 self.assertIsInstance(offer.get(required), str)
                 self.assertTrue(offer[required])
+            if offer["publicSalesEntry"]:
+                self.assertIsInstance(offer.get("price"), str)
+                self.assertTrue(offer["price"])
+            else:
+                self.assertNotIn("price", offer)
             offer_ids.append(offer["id"])
         self.assertEqual(len(offer_ids), len(set(offer_ids)))
         python_source = SCRIPT.read_text(encoding="utf-8")
         renderer_source = RENDERER.read_text(encoding="utf-8")
         commercial_literals = {
             config["form"]["requestUrl"],
-            *(offer["price"] for offer in config["offers"].values()),
+            *(offer["price"] for offer in config["offers"].values() if offer.get("publicSalesEntry")),
             config["form"]["copy"]["submitZh"],
             config["form"]["copy"]["sectionTitleZh"],
             config["form"]["privacy"]["boundaryZh"],
@@ -2540,6 +2548,78 @@ class PublicSkillRegressionTests(unittest.TestCase):
             payload = json.loads(passport_path.read_text(encoding="utf-8"))
             self.assertEqual(payload["places"][0]["photo"]["path"], str(display))
             self.assertNotEqual(payload["places"][0]["photo"]["path"], str(original))
+
+    def test_78_bilingual_skill_metadata_and_operator_guides_are_public_ready(self):
+        skill_text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+        agent_text = (SKILL / "agents" / "openai.yaml").read_text(encoding="utf-8")
+        config = product_config()
+        for phrase in (
+            "Language / 语言", "English quick start", '"outputLocale": "en-US"',
+            "save this place", "create my Bangkok passport",
+        ):
+            self.assertIn(phrase, skill_text)
+        self.assertIn("想去就出发｜Want to Go", agent_text)
+        self.assertIn("respond in the language I use", agent_text)
+        self.assertEqual(config["brand"]["platformNameEn"], "Want to Go | Travel Save Organizer")
+        self.assertTrue(config["brand"]["subtitleEn"])
+        for provider in config["platformImports"].values():
+            self.assertTrue(provider["requires"])
+            self.assertTrue(provider["requiresEn"])
+        self.assertNotIn("price", config["offers"]["preTripReview"])
+        for reference in (
+            "customer-output.md", "place-resolution.md", "provider-support.md",
+            "free-library-contract.md",
+        ):
+            self.assertIn(
+                "## English", (SKILL / "references" / reference).read_text(encoding="utf-8")
+            )
+
+    def test_79_english_platform_failures_are_actionable(self):
+        with self.assertRaisesRegex(ValueError, "short link was retained"):
+            EXTRACT.xiaohongshu_evidence(
+                "https://xhslink.com/example", {}, 15, "en-US",
+            )
+        args = argparse.Namespace(
+            name="", destination="Bangkok", city="", timeout=15,
+            output_locale="en-US",
+        )
+        with self.assertRaisesRegex(ValueError, "Ctrip URL was retained"):
+            EXTRACT.ctrip_evidence(
+                "https://you.ctrip.com/sight/bangkok/123.html", {}, args,
+            )
+        with mock.patch.object(EXTRACT, "run_opencli", return_value="验证码"):
+            with self.assertRaisesRegex(ValueError, "WeChat article triggered a security check"):
+                EXTRACT.wechat_evidence("https://mp.weixin.qq.com/s/example", {}, args)
+        with self.assertRaisesRegex(ValueError, "Mafengwo blocked the public article"):
+            EXTRACT.fetch_platform_link("https://www.mafengwo.cn/i/123.html", {}, args)
+
+    def test_80_english_passport_renders_full_customer_flow(self):
+        place = complete_business(
+            destination="Bangkok",
+            verifiedName="theCOMMONS Thonglor",
+            address="335 Sukhumvit Road, Bangkok",
+            openingHoursText="Daily 08:00–01:00",
+            signature="A community mall with cafés, shops and restaurants.",
+            visitTip="Recheck individual shop hours before departure.",
+            originalSourceLinks=[{
+                "url": "https://example.com/source", "label": "Original saved link",
+            }],
+        )
+        html = self.render({
+            "locale": "en-US", "destination": "Bangkok",
+            "presentation": {"visitorMode": True, "contentMode": "standard"},
+            "places": [W2G.customer_place(place, "en-US")],
+            "retainedClueCount": 0,
+        })
+        for phrase in (
+            "WANT TO GO PASSPORT", "A want-to-go itinerary you can take with you",
+            "Verification status", "Open original saved link",
+            "Want-to-go library and passport", "Manual day-by-day itinerary beta",
+            "Send itinerary request — no charge now", "Service boundary",
+        ):
+            self.assertIn(phrase, html)
+        for chinese_label in ("当地名称", "营业", "想去理由", "提交行程需求"):
+            self.assertNotIn(chinese_label, html)
 
 
 if __name__ == "__main__":

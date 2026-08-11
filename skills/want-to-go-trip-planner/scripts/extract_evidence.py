@@ -118,6 +118,14 @@ def clean_text(value):
     return value
 
 
+def is_english_locale(value):
+    return clean_text(value).casefold().startswith("en")
+
+
+def locale_text(locale, zh, en):
+    return en if is_english_locale(locale) else zh
+
+
 def unique(values):
     seen = set()
     result = []
@@ -344,17 +352,21 @@ def multi_place_document(value):
     return len(markers) >= 2 or len(named_sections) >= 3
 
 
-def xiaohongshu_evidence(url, source, timeout):
+def xiaohongshu_evidence(url, source, timeout, output_locale="zh-CN"):
     parsed_url = urlparse(url)
     if not host_matches(parsed_url.hostname, ["xiaohongshu.com"]):
-        raise ValueError(
-            "PLATFORM_INPUT_INCOMPLETE: 小红书短链已保留；请补充含 xsec_token 的完整笔记链接或截图"
-        )
+        raise ValueError(locale_text(
+            output_locale,
+            "PLATFORM_INPUT_INCOMPLETE: 小红书短链已保留；请补充含 xsec_token 的完整笔记链接或截图",
+            "PLATFORM_INPUT_INCOMPLETE: The Xiaohongshu short link was retained. Provide a full note URL with xsec_token or a screenshot.",
+        ))
     query = parsed_url.query
     if "xsec_token=" not in query:
-        raise ValueError(
-            "PLATFORM_INPUT_INCOMPLETE: 小红书链接已保留；读取正文需要含 xsec_token 的完整笔记链接或截图"
-        )
+        raise ValueError(locale_text(
+            output_locale,
+            "PLATFORM_INPUT_INCOMPLETE: 小红书链接已保留；读取正文需要含 xsec_token 的完整笔记链接或截图",
+            "PLATFORM_INPUT_INCOMPLETE: The Xiaohongshu URL was retained. Reading the note requires a full URL with xsec_token or a screenshot.",
+        ))
     payload = run_opencli(
         ["xiaohongshu", "note", url, "-f", "json"],
         timeout=max(timeout, 60),
@@ -367,7 +379,11 @@ def xiaohongshu_evidence(url, source, timeout):
         }
         payload = mapped or (payload[0] if payload and isinstance(payload[0], dict) else {})
     if not isinstance(payload, dict):
-        raise ValueError("PLATFORM_READ_FAILED: 小红书笔记返回格式不可识别")
+        raise ValueError(locale_text(
+            output_locale,
+            "PLATFORM_READ_FAILED: 小红书笔记返回格式不可识别",
+            "PLATFORM_READ_FAILED: The Xiaohongshu note returned an unsupported format.",
+        ))
     title = clean_text(payload.get("title") or payload.get("标题") or source.get("name"))
     content = clean_text(
         payload.get("content") or payload.get("desc") or payload.get("正文")
@@ -376,9 +392,11 @@ def xiaohongshu_evidence(url, source, timeout):
     engagement = platform_engagement(payload)
     text_value = "\n".join(item for item in (title, author, content) if item)
     if not clean_text(source.get("name")) and multi_place_document(text_value):
-        raise ValueError(
-            "PLATFORM_MULTIPLE_PLACES: 小红书笔记包含多个地点；原链接已保留，请指定要收纳的地点名或拆成多条来源"
-        )
+        raise ValueError(locale_text(
+            output_locale,
+            "PLATFORM_MULTIPLE_PLACES: 小红书笔记包含多个地点；原链接已保留，请指定要收纳的地点名或拆成多条来源",
+            "PLATFORM_MULTIPLE_PLACES: The Xiaohongshu note contains multiple places. The original URL was retained; name the target place or split it into separate sources.",
+        ))
     media_folder = clean_text(source.get("platformMediaDirectory"))
     media = []
     if source.get("downloadMedia") and media_folder:
@@ -415,11 +433,14 @@ def ctrip_place_id(url):
 
 
 def ctrip_evidence(url, source, args):
+    output_locale = getattr(args, "output_locale", "zh-CN")
     query = clean_text(source.get("name") or args.name)
     if not query:
-        raise ValueError(
-            "PLATFORM_INPUT_INCOMPLETE: 携程原链接已保留；请同时提供地点名或地点截图"
-        )
+        raise ValueError(locale_text(
+            output_locale,
+            "PLATFORM_INPUT_INCOMPLETE: 携程原链接已保留；请同时提供地点名或地点截图",
+            "PLATFORM_INPUT_INCOMPLETE: The Ctrip URL was retained. Also provide the place name or a place screenshot.",
+        ))
     payload = run_opencli(
         ["ctrip", "search", query, "--limit", "10", "-f", "json"],
         timeout=max(args.timeout, 60),
@@ -441,10 +462,18 @@ def ctrip_evidence(url, source, args):
         if destination_matches:
             candidates = destination_matches
     if not candidates:
-        raise ValueError("PLATFORM_NO_MATCH: 携程未找到与地点名、目的地或链接 ID 一致的候选")
+        raise ValueError(locale_text(
+            output_locale,
+            "PLATFORM_NO_MATCH: 携程未找到与地点名、目的地或链接 ID 一致的候选",
+            "PLATFORM_NO_MATCH: Ctrip returned no candidate matching the place name, destination or submitted URL ID.",
+        ))
     if len(candidates) != 1:
         labels = "；".join(clean_text(item.get("name")) for item in candidates[:5])
-        raise ValueError(f"PLATFORM_AMBIGUOUS: 携程存在多个地点或分店候选：{labels}")
+        raise ValueError(locale_text(
+            output_locale,
+            f"PLATFORM_AMBIGUOUS: 携程存在多个地点或分店候选：{labels}",
+            f"PLATFORM_AMBIGUOUS: Ctrip returned multiple place or branch candidates: {labels}",
+        ))
     item = candidates[0]
     title = clean_text(item.get("name") or query)
     original_text = "\n".join(
@@ -493,20 +522,31 @@ def parse_wechat_markdown(markdown):
 
 
 def wechat_evidence(url, source, args):
+    output_locale = getattr(args, "output_locale", "zh-CN")
     markdown = run_opencli(
         ["web", "read", "--url", url, "--stdout", "true", "--download-images", "false"],
         timeout=max(args.timeout, 120),
     )
     lower = markdown.casefold()
     if any(marker in lower for marker in ("安全检测", "验证码", "verification code", "访问过于频繁")):
-        raise ValueError("PLATFORM_SECURITY_CHECK: 公众号文章触发安全检测，原链接已保留")
+        raise ValueError(locale_text(
+            output_locale,
+            "PLATFORM_SECURITY_CHECK: 公众号文章触发安全检测，原链接已保留",
+            "PLATFORM_SECURITY_CHECK: The WeChat article triggered a security check. The original URL was retained.",
+        ))
     parsed = parse_wechat_markdown(markdown)
     if not parsed["title"] or len(clean_text(parsed["originalText"])) < 80:
-        raise ValueError("PLATFORM_READ_FAILED: 未读取到完整公众号文章正文")
+        raise ValueError(locale_text(
+            output_locale,
+            "PLATFORM_READ_FAILED: 未读取到完整公众号文章正文",
+            "PLATFORM_READ_FAILED: The complete WeChat article body could not be read.",
+        ))
     if not clean_text(source.get("name") or args.name) and multi_place_document(markdown):
-        raise ValueError(
-            "PLATFORM_MULTIPLE_PLACES: 公众号文章包含多个地点；原链接已保留，请指定要收纳的地点名或拆成多条来源"
-        )
+        raise ValueError(locale_text(
+            output_locale,
+            "PLATFORM_MULTIPLE_PLACES: 公众号文章包含多个地点；原链接已保留，请指定要收纳的地点名或拆成多条来源",
+            "PLATFORM_MULTIPLE_PLACES: The WeChat article contains multiple places. The original URL was retained; name the target place or split it into separate sources.",
+        ))
     return {
         **parsed,
         "platform": "wechat_official",
@@ -526,15 +566,17 @@ def wechat_evidence(url, source, args):
 def fetch_platform_link(url, source, args):
     platform = classify_link_platform(url)
     if platform == "xiaohongshu":
-        return xiaohongshu_evidence(url, source, args.timeout)
+        return xiaohongshu_evidence(url, source, args.timeout, getattr(args, "output_locale", "zh-CN"))
     if platform == "ctrip":
         return ctrip_evidence(url, source, args)
     if platform == "wechat_official":
         return wechat_evidence(url, source, args)
     if platform == "mafengwo":
-        raise ValueError(
-            "PLATFORM_SECURITY_CHECK: 马蜂窝公开正文触发安全检测；原链接已保留，请补截图、保存网页或粘贴文字"
-        )
+        raise ValueError(locale_text(
+            getattr(args, "output_locale", "zh-CN"),
+            "PLATFORM_SECURITY_CHECK: 马蜂窝公开正文触发安全检测；原链接已保留，请补截图、保存网页或粘贴文字",
+            "PLATFORM_SECURITY_CHECK: Mafengwo blocked the public article with a security check. The original URL was retained; provide screenshots, a saved page or pasted text.",
+        ))
     document, final_url = fetch_public_link(url, args.timeout)
     parsed = parse_html_evidence(document)
     parsed["platform"] = platform
