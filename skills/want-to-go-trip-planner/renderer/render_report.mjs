@@ -17,15 +17,18 @@ const FALLBACK_URL = PRODUCT_CONFIG.form.fallbackUrl;
 const FORM_COPY = PRODUCT_CONFIG.form.copy;
 const FREE_OFFER = PRODUCT_CONFIG.offers.free;
 const MANUAL_OFFER = PRODUCT_CONFIG.offers.manualItineraryBeta;
+const SENSITIVE_QUERY_KEYS = new Set([
+  "xsec_token", "xsec_source", "access_token", "refresh_token", "auth_token",
+  "authorization", "api_key", "apikey", "signature", "sig",
+]);
 const INTERNAL_PATTERN =
-  /(?:\.workbuddy|\.claude|\/Users\/|\/mnt\/|localhost|127\.0\.0\.1|sourceRefs?|sourceIds?|mediaIds?|confidenceScore|detailLookupAudit|nameSource|hostChecks|platformAccess|platformItemId|platformEngagement|failureCode|paidPlanningReady|宿主诊断|schemaVersion|paymentCode|operationId|tombstones?)/i;
-const CONTENT_LEAK_PATTERN = /(?:\.workbuddy|\.claude|\/Users\/|\/mnt\/|localhost|127\.0\.0\.1|宿主诊断)/i;
+  /(?:\.workbuddy|\.claude|\/Users\/|\/mnt\/|[A-Za-z]:[\\/](?:Users|Documents and Settings)[\\/]|%USERPROFILE%|https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?|sourceRefs?|sourceIds?|mediaIds?|confidenceScore|detailLookupAudit|nameSource|hostChecks|platformAccess|platformItemId|platformEngagement|failureCode|paidPlanningReady|宿主诊断|schemaVersion|paymentCode|operationId|tombstones?)/i;
+const CONTENT_LEAK_PATTERN = /(?:\.workbuddy|\.claude|\/Users\/|\/mnt\/|[A-Za-z]:[\\/](?:Users|Documents and Settings)[\\/]|%USERPROFILE%|https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?|宿主诊断)/i;
 const SECRET_PATTERN = /(?:-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\b(?:sk|rk|pk)_[A-Za-z0-9]{20,}\b|\bBearer\s+[A-Za-z0-9._~+/=-]{16,})/i;
 
 function contentForSecretScan(html) {
   return html
-    .replace(/data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+/g, "[embedded-image]")
-    .replace(/<!--.*?-->/gs, "");
+    .replace(/data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+/g, "[embedded-image]");
 }
 
 function customerTextForScan(html) {
@@ -37,7 +40,6 @@ function clean(value, max = 260, field = "content") {
   const text = String(value ?? "").replace(/\s+/g, " ").trim();
   if (!text) return "";
   if (CONTENT_LEAK_PATTERN.test(text)) {
-    process.stderr.write(`suppressed unsafe ${field}\n`);
     return "";
   }
   return text.slice(0, max);
@@ -69,13 +71,38 @@ function assertSafeUrlAttributes(html) {
 function dataUrlFromPath(file, baseDir) {
   if (!file || /^https?:\/\//i.test(file)) return "";
   const resolved = path.resolve(baseDir, file);
+  const relative = path.relative(path.resolve(baseDir), resolved);
+  if (relative.startsWith(`..${path.sep}`) || relative === ".." || path.isAbsolute(relative)) {
+    throw new Error("unsafe local image path outside passport directory");
+  }
   if (!fs.existsSync(resolved)) return "";
   const stat = fs.lstatSync(resolved);
   if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_PHOTO_BYTES) return "";
   const mime = {".png":"image/png",".jpg":"image/jpeg",".jpeg":"image/jpeg",".webp":"image/webp"}[
     path.extname(resolved).toLowerCase()
   ];
-  return mime ? `data:${mime};base64,${fs.readFileSync(resolved).toString("base64")}` : "";
+  if (!mime) return "";
+  const data = fs.readFileSync(resolved);
+  if (!imageMagicMatches(data, mime)) throw new Error("unsafe local image content");
+  return `data:${mime};base64,${data.toString("base64")}`;
+}
+
+function imageMagicMatches(data, mime) {
+  if (!Buffer.isBuffer(data) || data.length < 12) return false;
+  if (mime === "image/png") return data.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10]));
+  if (mime === "image/jpeg") return data[0] === 0xff && data[1] === 0xd8 && data[data.length - 2] === 0xff && data[data.length - 1] === 0xd9;
+  if (mime === "image/webp") return data.subarray(0, 4).toString("ascii") === "RIFF" && data.subarray(8, 12).toString("ascii") === "WEBP";
+  return false;
+}
+
+function validatedDataUrl(value) {
+  const match = String(value || "").match(/^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/i);
+  if (!match) return "";
+  const data = Buffer.from(match[2], "base64");
+  if (data.length > MAX_PHOTO_BYTES || !imageMagicMatches(data, match[1].toLowerCase())) {
+    throw new Error("unsafe embedded image content");
+  }
+  return value;
 }
 
 function photoFor(place, baseDir) {
@@ -85,11 +112,13 @@ function photoFor(place, baseDir) {
     : raw;
   const source =
     /^data:image\/(?:png|jpeg|webp);base64,/.test(photo.dataUrl || "")
-      ? photo.dataUrl
+      ? validatedDataUrl(photo.dataUrl)
       : dataUrlFromPath(photo.path || place.photoPath, baseDir);
   if (!source) return "";
-  const x = Math.max(0, Math.min(1, Number(photo.focalPoint?.x ?? 0.5))) * 100;
-  const y = Math.max(0, Math.min(1, Number(photo.focalPoint?.y ?? 0.5))) * 100;
+  const rawX = Number(photo.focalPoint?.x ?? 0.5);
+  const rawY = Number(photo.focalPoint?.y ?? 0.5);
+  const x = Math.max(0, Math.min(1, Number.isFinite(rawX) ? rawX : 0.5)) * 100;
+  const y = Math.max(0, Math.min(1, Number.isFinite(rawY) ? rawY : 0.5)) * 100;
   return `<div class="photo"><img src="${escapeHtml(source)}" alt="${escapeHtml(clean(place.name, 100))}" style="object-position:${x}% ${y}%"></div>`;
 }
 
@@ -102,7 +131,8 @@ function publicLinks(place) {
   const links = [];
   for (const item of place.originalSourceLinks || []) {
     const url = typeof item === "string" ? item : item?.url || item?.href || item?.publicRef;
-    if (/^https?:\/\//i.test(url || "") && !links.includes(url)) links.push(url);
+    const safeUrl = customerSafeUrl(url);
+    if (safeUrl && !links.includes(safeUrl)) links.push(safeUrl);
   }
   return links;
 }
@@ -111,12 +141,26 @@ function publicAuditLinks(items) {
   const result = [];
   const seen = new Set();
   for (const item of Array.isArray(items) ? items : []) {
-    const url = item?.url;
+    const url = customerSafeUrl(item?.url);
     if (!/^https?:\/\//i.test(url || "") || seen.has(url)) continue;
     seen.add(url);
     result.push({url, label: clean(item?.label, 100) || url});
   }
   return result;
+}
+
+function customerSafeUrl(value) {
+  if (!/^https?:\/\//i.test(value || "")) return "";
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return "";
+  }
+  for (const key of [...parsed.searchParams.keys()]) {
+    if (SENSITIVE_QUERY_KEYS.has(key.toLowerCase())) parsed.searchParams.delete(key);
+  }
+  return parsed.toString();
 }
 
 function verificationPanel(place, en) {
@@ -156,7 +200,7 @@ function riskPanel(risks, en, className = "risk-list") {
 function publicAreas(places, en) {
   const counts = new Map();
   for (const place of places) {
-    const label = clean(place.area || place.district || place.neighborhood || place.branch, 80)
+    const label = clean(place.areaGroup || place.area || place.district || place.neighborhood || place.branch, 80)
       || (en ? "SAVED PLACES" : "未分片区");
     counts.set(label, (counts.get(label) || 0) + 1);
   }
@@ -247,6 +291,9 @@ function card(place, locale, baseDir) {
         ${fact(en ? "Address" : "地址", place.address || place.positionText)}
         ${fact(en ? "Hours" : "营业", place.openingHoursText)}
         ${fact(en ? "Duration" : "建议时长", place.suggestedDuration)}
+        ${fact(en ? "Area" : "片区", place.areaGroup)}
+        ${fact(en ? "Accessibility" : "无障碍提示", place.accessibilityNote)}
+        ${fact(en ? "Review status" : "复核状态", place.verificationStatus)}
         ${fact(en ? "Why go" : "想去理由", place.signature)}
         ${fact(en ? "Before you go" : "出发提醒", place.visitTip)}
       </dl>
@@ -267,14 +314,15 @@ function render(report, inputPath) {
   const places = Array.isArray(report.places) ? report.places : [];
   const retained = Math.max(0, Number(report.retainedClueCount || 0));
   const destination = clean(report.destination, 80) || (en ? "MY TRIP" : "我的旅程");
-  const contentMode = ["deep", "standard", "compact"].includes(report.presentation?.contentMode)
-    ? report.presentation.contentMode
+  const requestedMode = report.presentation?.contentDepth || report.presentation?.contentMode;
+  const contentMode = ["deep", "standard", "compact"].includes(requestedMode)
+    ? requestedMode
     : "standard";
   const sourceLinkCount = places.reduce((sum, place) => sum + publicLinks(place).length, 0);
   const areas = publicAreas(places, en);
   const baseDir = path.dirname(inputPath);
   const visitorMode = report.presentation?.visitorMode === true;
-  return `<!doctype html><html lang="${en ? "en" : "zh-CN"}"><head><meta charset="utf-8">
+  const html = `<!doctype html><html lang="${en ? "en" : "zh-CN"}"><head><meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title>
   <style>${KORNVIA_REPORT_CSS}</style></head><body><main class="shell">
     <header class="hero ticket">
@@ -315,6 +363,7 @@ function render(report, inputPath) {
       : `另有 ${retained} 条地点线索已保留，核实后可补进下一版。`}</aside>` : ""}
     ${requestCard(report, locale, places.length)}
   </main><!-- ${REPORT_TEMPLATE_VERSION} --></body></html>`;
+  return html.replace(/[ \t]+$/gm, "");
 }
 
 function main() {
@@ -333,4 +382,57 @@ function main() {
   process.stdout.write(`${en ? PRODUCT_CONFIG.copy.passportReadyEn : PRODUCT_CONFIG.copy.passportReadyZh}\n`);
 }
 
-main();
+function rendererErrorCode(error) {
+  const message = String(error?.message || error || "");
+  if (message.includes("local image")) return "UNSAFE_LOCAL_IMAGE";
+  if (message.includes("embedded image")) return "UNSAFE_EMBEDDED_IMAGE";
+  if (message.includes("customer URL")) return "UNSAFE_CUSTOMER_URL";
+  if (message.includes("internal text")) return "CUSTOMER_INTERNAL_LEAK";
+  if (message.includes("secret-like")) return "CUSTOMER_SECRET_LEAK";
+  if (message.includes("no deliverable places")) return "NO_DELIVERABLE_PLACES";
+  if (message.includes("invalid input") || message.includes("usage:")) return "INVALID_RENDER_INPUT";
+  return "RENDER_FAILED";
+}
+
+function rendererLocale(inputPath) {
+  try {
+    const stat = fs.statSync(inputPath);
+    if (!stat.isFile() || stat.size > MAX_INPUT_BYTES) return "zh-CN";
+    return JSON.parse(fs.readFileSync(inputPath, "utf8")).locale === "en-US" ? "en-US" : "zh-CN";
+  } catch {
+    return "zh-CN";
+  }
+}
+
+const RENDER_ERROR_MESSAGES = {
+  "zh-CN": {
+    UNSAFE_LOCAL_IMAGE: "本地图片不在授权的护照资产目录内，或文件内容与图片类型不一致。",
+    UNSAFE_EMBEDDED_IMAGE: "内嵌图片内容无效或超过大小限制。",
+    UNSAFE_CUSTOMER_URL: "客户页面包含不安全的链接或协议。",
+    CUSTOMER_INTERNAL_LEAK: "客户页面包含内部字段或本地路径，已阻止生成。",
+    CUSTOMER_SECRET_LEAK: "客户页面包含疑似密钥或凭证，已阻止生成。",
+    NO_DELIVERABLE_PLACES: "没有可交付地点，请先补齐并确认地点信息。",
+    INVALID_RENDER_INPUT: "护照输入文件缺失、过大或格式不正确。",
+    RENDER_FAILED: "护照页面生成失败，请检查输入数据后重试。",
+  },
+  "en-US": {
+    UNSAFE_LOCAL_IMAGE: "The local image is outside the authorized passport asset directory or its content does not match its image type.",
+    UNSAFE_EMBEDDED_IMAGE: "The embedded image is invalid or exceeds the size limit.",
+    UNSAFE_CUSTOMER_URL: "The customer page contains an unsafe URL or protocol.",
+    CUSTOMER_INTERNAL_LEAK: "The customer page contains an internal field or local path, so rendering was blocked.",
+    CUSTOMER_SECRET_LEAK: "The customer page contains a possible secret or credential, so rendering was blocked.",
+    NO_DELIVERABLE_PLACES: "There are no deliverable places. Complete and confirm place details first.",
+    INVALID_RENDER_INPUT: "The passport input file is missing, too large or invalid.",
+    RENDER_FAILED: "The passport page could not be generated. Check the input data and retry.",
+  },
+};
+
+try {
+  main();
+} catch (error) {
+  const inputPath = process.argv.slice(2)[0] || "";
+  const locale = rendererLocale(inputPath);
+  const code = rendererErrorCode(error);
+  process.stderr.write(`${JSON.stringify({code, message: RENDER_ERROR_MESSAGES[locale][code]})}\n`);
+  process.exitCode = 1;
+}
