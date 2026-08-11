@@ -530,7 +530,7 @@ def destination_key_for_library(library: dict[str, Any], value: Any) -> str:
 
 
 def destination_label(key: str, fallback: str = "") -> str:
-    return DESTINATION_LABELS_ZH.get(key) or text(fallback) or key
+    return text(fallback) or DESTINATION_LABELS_ZH.get(key) or key
 
 
 def source_destination(source: dict[str, Any], bundle_destination: str = "") -> str:
@@ -546,6 +546,19 @@ def bundle_destination_keys(bundle: dict[str, Any]) -> set[str]:
         destination_key(source_destination(source, bundle_destination))
         for source in sources
     }
+
+
+def bundle_destination_labels(bundle: dict[str, Any]) -> dict[str, str]:
+    bundle_destination = text(bundle.get("destination"))
+    labels: dict[str, str] = {}
+    for source in bundle_sources(bundle):
+        label = source_destination(source, bundle_destination)
+        key = destination_key(label)
+        if key not in labels and label:
+            labels[key] = label
+    if not labels and bundle_destination:
+        labels[destination_key(bundle_destination)] = bundle_destination
+    return labels
 
 
 def collection_id(key: str) -> str:
@@ -1406,8 +1419,9 @@ def command_ingest(args: argparse.Namespace) -> None:
         library["ingestBatches"] = [item for item in library["ingestBatches"] if item.get("id") != bundle_id]
         library["ingestBatches"].append(batch)
         append_event(library, operation_id, "source.ingest", bundle_id, after={"sourceIds": source_ids})
+    destination_labels = bundle_destination_labels(bundle)
     destinations = sorted(
-        destination_label(key)
+        destination_label(key, destination_labels.get(key, ""))
         for key in bundle_destination_keys(bundle)
     )
     print(json.dumps({"status": "saved", "bundleId": bundle_id, "destinations": destinations}, ensure_ascii=False))
