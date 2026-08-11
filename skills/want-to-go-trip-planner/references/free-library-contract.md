@@ -6,7 +6,7 @@
 
 - 免费自己整理：截图、链接、视频和文字收纳；按目的地分库；地点卡与配图；Kornvia 想去护照；基础片区分组；修改、删除、恢复、排序、撤销和本地导出。
 - 黄色推荐 ¥199：一个城市、3–7 天、2–15 个地点的人工逐日行程内测，含一次范围内修改和一次双方约定日期的出发前复核；不代订、不持续监控。
-- 独立 ¥39.9 复核能力保留为非公开能力，不在客户交付中展示独立销售入口、价格卡或直接购买表达，也不称为赠品。
+- 独立复核能力保留为非公开能力，不在客户交付中展示独立销售入口、价格卡或直接购买表达，也不称为赠品。
 - 客户 CTA 只提交服务意愿，不立即扣款。收款顺序固定为：提交意愿 → 确认范围、档期和交付时间 → 顾客确认 → 单独发送付款方式 → 人工登记付款 → 开始交付。
 
 ## 共享契约
@@ -137,3 +137,18 @@ Schema 的 `required` 是跨端最低必填；未列入 `required` 的属性为�
 ```
 
 完整实体、枚举和条件必填以 JSON Schema 为准。
+
+## English contract summary
+
+Read version, commercial copy, form URL and service scope only from `../config/product.json`. The public offer structure is Free self-organization plus the recommended ¥199 manual day-by-day itinerary beta. The paid beta covers one city, 3–7 days and 2–15 places, one in-scope revision and one pre-trip review on an agreed date; it excludes booking and continuous monitoring. The form records intent only and does not charge on submission.
+
+`shared-data-contract-v2.schema.json` is the machine contract. The library root requires `schemaVersion`, identity/revision timestamps, `destinations`, `places`, `sources`, `media`, `verificationSnapshots`, `tripRequests`, `events` and `tombstones`.
+
+- `destination` owns place/source membership and display order.
+- `place` is editable and references evidence/media IDs.
+- `source` is a versioned evidence ledger. `submittedUrl` exists only for a URL actually supplied by the customer.
+- `media` separates immutable originals from display crops; originals keep SHA-256.
+- `verificationSnapshot` records one agreed-date review and its diff, not continuous monitoring.
+- `tripRequest` is a local intent/service-stage record, not proof of POST, payment, acceptance or production synchronization.
+
+Keep machine keys and enums language-neutral. Chinese and English customer views must project from the same library without duplicating or translating IDs. Migrate with `migrate --dry-run` first; use file locks, same-directory temporary files, `fsync` and atomic replacement. Repair only derivable indexes and block on changed original hashes or duplicate place IDs that cannot be resolved safely.

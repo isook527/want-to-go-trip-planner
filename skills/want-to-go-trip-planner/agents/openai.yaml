@@ -1,4 +1,4 @@
 interface:
-  display_name: "想去就出发"
-  short_description: "按目的地收纳旅行收藏，维护可编辑护照与约定日期复核记录"
-  default_prompt: "使用 $want-to-go-trip-planner 把我本轮发送的旅行截图、链接、视频或文字按目的地收进想去库；只有我明确要求时才生成护照，复核只在双方约定日期执行一次。"
+  display_name: "Want to Go｜想去就出发"
+  short_description: "Organize travel saves by destination｜按目的地整理旅行收藏"
+  default_prompt: "Use $want-to-go-trip-planner to organize these travel screenshots, public links, videos or notes by destination. Detect my language automatically and keep the whole workflow and passport in that language."
