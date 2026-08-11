@@ -11,7 +11,7 @@
 - `opencli` 可能复用本机已有浏览器的只读会话状态；Skill 不代用户登录、不导出或上传 Cookie，遇验证码、登录或安全检查立即停止并保留原始链接。不要从不明来源安装或替换该二进制。
 - PowerShell 5.1 脚本源保持 ASCII-safe，运行时从 UTF-8 配置读取版本；会话设置 `PYTHONUTF8=1` 与 `PYTHONIOENCODING=utf-8`。
 
-本地 macOS 测试和 PowerShell 静态检查不能替代真实 Windows runner。没有远程上传授权时，明确把真实 Windows 复验列为阻塞项。
+本地 macOS 测试和 PowerShell 静态检查不能替代真实 Windows runner。Windows workflow 已固定 Actions 完整提交、Chocolatey 包版本及 `chi_sim` 模型提交与 SHA-256；只有远端 runner 实际成功并产出 artifact 后，才能把该次提交标为 Windows 已验收。
 
 ## `accessLevel`
 
@@ -39,6 +39,7 @@
 - 视频：有本体时本地抽帧；只有分享页时保留链接并请求原视频/关键截图。
 - 链接：只读取公开 HTTP(S) 标准端口，防 SSRF；阻挡时不绕过。
 - 小红书：支持含 `xsec_token` 的完整笔记链接读取正文，并在 durable 模式下载逐张媒体；短链只保留，需补完整链接或截图。下载文件按文件头识别真实 MIME，不能相信 `.jpg` 扩展名。
+- 完整提交 URL 只保存在内部来源账本；生成客户 HTML 时移除 `xsec_token` 等凭证式查询参数，不删除普通内容定位参数。
 - 携程：详情页直接读取会被 432 阻挡；支持用顾客同时提供的地点名搜索，再用目的地与原链接内地点 ID 消歧，保存名称、城市、国家、坐标和 provider ID。只有链接、没有地点名或截图时必须返回待补充，不能猜。
 - 微信公众号：支持公开的 `mp.weixin.qq.com` 与搜狗微信文章 URL，经浏览器读取标题、正文与图片 URL；触发安全检测时保留原链接并请求保存页或截图。
 - 马蜂窝：当前公开文章实测触发安全检测。禁止宣称已读正文或绕过验证；保留顾客 URL，并通过截图、浏览器保存的 HTML 或粘贴文字完成收纳。

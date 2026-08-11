@@ -151,4 +151,4 @@ Read version, commercial copy, form URL and service scope only from `../config/p
 - `verificationSnapshot` records one agreed-date review and its diff, not continuous monitoring.
 - `tripRequest` is a local intent/service-stage record, not proof of POST, payment, acceptance or production synchronization.
 
-Keep machine keys and enums language-neutral. Chinese and English customer views must project from the same library without duplicating or translating IDs. Migrate with `migrate --dry-run` first; use file locks, same-directory temporary files, `fsync` and atomic replacement. Repair only derivable indexes and block on changed original hashes or duplicate place IDs that cannot be resolved safely.
+Keep machine keys and enums language-neutral. Chinese and English customer views must project from the same library without duplicating or translating IDs. Migrate with `migrate --dry-run` first; use file locks, same-directory temporary files, `fsync` and atomic replacement. Repair only derivable indexes; safely merge resolvable duplicate place IDs, and block on changed original hashes, dangling source references or duplicate IDs that cannot be resolved safely.

@@ -61,10 +61,16 @@ if ($null -eq $pythonName) {
         fullReady = $false
         dependencies = [ordered]@{
             python = [ordered]@{ installed = $false; ready = $false; minimum = "3.9" }
-            node = [ordered]@{ installed = (Test-Executable "node") }
-            tesseract = [ordered]@{ installed = (Test-Executable "tesseract") }
-            ffmpeg = [ordered]@{ installed = (Test-Executable "ffmpeg") }
-            ffprobe = [ordered]@{ installed = (Test-Executable "ffprobe") }
+            pillow = [ordered]@{ installed = $false; ready = $false }
+            node = [ordered]@{ installed = (Test-Executable "node"); ready = $false }
+            macosVision = [ordered]@{
+                available = $false
+                swift = [ordered]@{ installed = $false; ready = $false }
+            }
+            tesseract = [ordered]@{ installed = (Test-Executable "tesseract"); ready = $false }
+            ffmpeg = [ordered]@{ installed = (Test-Executable "ffmpeg"); ready = $false }
+            ffprobe = [ordered]@{ installed = (Test-Executable "ffprobe"); ready = $false }
+            opencli = [ordered]@{ installed = (Test-Executable "opencli"); ready = $false }
         }
         blockingIssues = @($missingPythonMessage)
         featureWarnings = @()

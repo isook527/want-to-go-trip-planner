@@ -11,11 +11,30 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import sys
 from pathlib import Path
 
 
 DEFAULT_ASPECT = 4 / 3
 DEFAULT_MIN_PHOTO_SCORE = 0.45
+
+
+def cli_locale() -> str:
+    for index, value in enumerate(sys.argv[1:]):
+        if value == "--locale" and index + 2 <= len(sys.argv[1:]):
+            return "en-US" if sys.argv[1:][index + 1].lower().startswith("en") else "zh-CN"
+    return "zh-CN"
+
+
+class LocalizedArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        locale = cli_locale()
+        text = (
+            "Image preparation arguments are missing or invalid. Check the help text and retry."
+            if locale == "en-US"
+            else "图片处理参数缺失或格式不正确，请按帮助中的参数重试。"
+        )
+        self.exit(2, json.dumps({"code": "ARGUMENT_ERROR", "message": text}, ensure_ascii=False) + "\n")
 
 
 def parse_aspect(value: str) -> float:
@@ -137,7 +156,7 @@ def prepare_display_image(
     try:
         from PIL import Image
     except ImportError as exc:
-        raise SystemExit("Pillow is required for deterministic display-image cropping") from exc
+        raise RuntimeError("PILLOW_REQUIRED") from exc
 
     with Image.open(input_path) as opened:
         source = opened.convert("RGB")
@@ -165,19 +184,36 @@ def prepare_display_image(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser()
+    parser = LocalizedArgumentParser()
     parser.add_argument("input")
     parser.add_argument("output")
     parser.add_argument("--target-aspect", type=parse_aspect, default=DEFAULT_ASPECT)
     parser.add_argument("--min-photo-score", type=float, default=DEFAULT_MIN_PHOTO_SCORE)
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--locale", choices=("zh-CN", "en-US", "en"), default="zh-CN")
     args = parser.parse_args()
-    metadata = prepare_display_image(
-        args.input,
-        args.output,
-        aspect=args.target_aspect,
-        min_photo_score=max(0.0, min(1.0, args.min_photo_score)),
-    )
+    try:
+        metadata = prepare_display_image(
+            args.input,
+            args.output,
+            aspect=args.target_aspect,
+            min_photo_score=max(0.0, min(1.0, args.min_photo_score)),
+        )
+    except (OSError, RuntimeError, ValueError) as error:
+        locale = "en-US" if args.locale.startswith("en") else "zh-CN"
+        code = "PILLOW_REQUIRED" if str(error) == "PILLOW_REQUIRED" else "IMAGE_PREPARATION_FAILED"
+        messages = {
+            "zh-CN": {
+                "PILLOW_REQUIRED": "缺少 Pillow，无法生成确定性的展示裁切图。",
+                "IMAGE_PREPARATION_FAILED": "图片读取或裁切失败，请检查文件格式、路径和权限。",
+            },
+            "en-US": {
+                "PILLOW_REQUIRED": "Pillow is required to create a deterministic display crop.",
+                "IMAGE_PREPARATION_FAILED": "The image could not be read or cropped. Check its format, path and permissions.",
+            },
+        }
+        print(json.dumps({"code": code, "message": messages[locale][code]}, ensure_ascii=False), file=sys.stderr)
+        return 1
     print(json.dumps(metadata, ensure_ascii=False) if args.json else metadata["output"])
     return 0
 

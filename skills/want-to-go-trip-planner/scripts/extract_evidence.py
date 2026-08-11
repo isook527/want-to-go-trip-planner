@@ -102,11 +102,78 @@ LATIN_PLACE_PATTERN = re.compile(
 )
 UNTRUSTED_INSTRUCTION_PATTERN = re.compile(
     r"(?:ignore\s+(?:all\s+)?(?:previous|prior|above)\s+instructions?|"
+    r"disregard\s+(?:all\s+)?(?:previous|prior|earlier)\s+(?:instructions?|guidance)|"
+    r"override\s+(?:the\s+)?(?:system|developer|previous)\s+(?:prompt|message|instructions?)|"
+    r"(?:new\s+task|act\s+as|developer\s+mode)\s*[:：]?|"
     r"system\s+prompt|developer\s+message|reveal\s+(?:the\s+)?prompt|"
     r"忽略(?:之前|以上|前面)(?:所有)?(?:指令|要求)|系统提示词|开发者消息|"
+    r"(?:新任务|请执行|开发者模式)\s*[:：]?|"
     r"按以下(?:指令|要求)执行|不要遵守(?:之前|系统)(?:指令|要求))",
     re.IGNORECASE,
 )
+
+CLI_ERROR_MESSAGES = {
+    "zh-CN": {
+        "ARGUMENT_ERROR": "命令参数不完整或格式不正确，请按帮助中的参数重新执行。",
+        "PLATFORM_ADAPTER_UNAVAILABLE": "当前平台读取组件不可用；原始资料不会丢失，请安装依赖或改用截图、原视频或文字。",
+        "PLATFORM_READ_FAILED": "平台公开内容本轮读取失败；原链接已保留，请稍后重试或补截图、原视频或文字。",
+        "FILE_ERROR": "无法读取或写入指定文件，请检查路径、权限和文件状态。",
+        "JSON_ERROR": "JSON 文件格式不正确，请修正后重试。",
+        "NETWORK_ERROR": "公开网络内容读取失败；原链接已保留，请检查网络后重试。",
+        "INVALID_INPUT": "输入内容不符合要求，请核对文件类型、大小、链接和必填字段。",
+        "ERROR": "证据提取未完成，请检查输入和依赖状态后重试。",
+    },
+    "en-US": {
+        "ARGUMENT_ERROR": "Command arguments are missing or invalid. Check the help text and try again.",
+        "PLATFORM_ADAPTER_UNAVAILABLE": "The platform reader is unavailable. Your source is retained; install the dependency or provide screenshots, the original video or text.",
+        "PLATFORM_READ_FAILED": "The public platform content could not be read in this run. The original URL is retained; retry later or provide screenshots, the original video or text.",
+        "FILE_ERROR": "The requested file could not be read or written. Check its path, permissions and state.",
+        "JSON_ERROR": "The JSON file is invalid. Correct it and try again.",
+        "NETWORK_ERROR": "The public network content could not be read. The original URL is retained; check the connection and retry.",
+        "INVALID_INPUT": "The input is invalid. Check file type, size, URL and required fields.",
+        "ERROR": "Evidence extraction did not complete. Check the input and dependency status, then try again.",
+    },
+}
+
+
+def normalized_locale(value):
+    return "en-US" if str(value or "").lower().startswith("en") else "zh-CN"
+
+
+def requested_cli_locale(argv):
+    for index, value in enumerate(argv):
+        if value in {"--locale", "--output-locale"} and index + 1 < len(argv):
+            return normalized_locale(argv[index + 1])
+        if value.startswith(("--locale=", "--output-locale=")):
+            return normalized_locale(value.split("=", 1)[1])
+    return "zh-CN"
+
+
+def cli_error_payload(error, locale):
+    message = str(error)
+    prefix = re.match(r"^([A-Z][A-Z0-9_]{2,}):", message)
+    code = prefix.group(1) if prefix else "ERROR"
+    lowered = message.casefold()
+    if isinstance(error, json.JSONDecodeError):
+        code = "JSON_ERROR"
+    elif isinstance(error, OSError):
+        code = "NETWORK_ERROR" if isinstance(error, urllib.error.URLError) else "FILE_ERROR"
+    elif code == "ERROR" and any(token in lowered for token in ("must ", "required", "invalid", "does not exist", "exceeds", "unsupported")):
+        code = "INVALID_INPUT"
+    normalized = normalized_locale(locale)
+    messages = CLI_ERROR_MESSAGES[normalized]
+    if code.startswith("PLATFORM_") and code not in messages:
+        safe_message = message.split(":", 1)[1].strip() if ":" in message else messages["ERROR"]
+    else:
+        safe_message = messages.get(code, messages["ERROR"])
+    return {"code": code, "message": safe_message}
+
+
+class LocalizedArgumentParser(argparse.ArgumentParser):
+    def error(self, message):
+        locale = requested_cli_locale(sys.argv[1:])
+        payload = {"code": "ARGUMENT_ERROR", "message": CLI_ERROR_MESSAGES[locale]["ARGUMENT_ERROR"]}
+        self.exit(2, json.dumps(payload, ensure_ascii=False) + "\n")
 
 
 def now():
@@ -233,8 +300,7 @@ def run_opencli(arguments, timeout=60, expect_json=False):
         check=False,
     )
     if result.returncode != 0:
-        message = clean_text(result.stderr or result.stdout)[:500]
-        raise ValueError(f"PLATFORM_READ_FAILED: {message or 'opencli returned an error'}")
+        raise ValueError(f"PLATFORM_READ_FAILED: opencli exited with code {result.returncode}")
     output = result.stdout.strip()
     if expect_json:
         try:
@@ -691,7 +757,7 @@ def validate_connected_peer(response, request_url=""):
     raw = getattr(file_pointer, "raw", None)
     sock = getattr(raw, "_sock", None)
     if sock is None:
-        return
+        raise ValueError("link connected peer could not be verified")
     address = sock.getpeername()[0]
     peer_ip = ipaddress.ip_address(address)
     if peer_ip.is_global:
@@ -1654,6 +1720,7 @@ def preserve_screenshot_asset(evidence, source, output_path, bundle_id, storage_
     if evidence.get("sourceType") != "screenshot" or not os.path.isfile(original):
         return evidence
     target_path = original
+    original_sha = file_sha256(original)
     asset_root = ""
     if output_path:
         output = os.path.abspath(output_path)
@@ -1669,15 +1736,19 @@ def preserve_screenshot_asset(evidence, source, output_path, bundle_id, storage_
             extension = ".png"
         target_path = os.path.join(
             asset_root,
-            f"{safe_asset_token(source.get('id') or evidence.get('sourceId'))}{extension}",
+            f"{safe_asset_token(source.get('id') or evidence.get('sourceId'))}.{original_sha[:16]}{extension}",
         )
         if os.path.realpath(original) != os.path.realpath(target_path):
             shutil.copy2(original, target_path)
     evidence["localPath"] = target_path
-    evidence["originalSha256"] = file_sha256(target_path)
+    evidence["originalSha256"] = original_sha
     evidence["originalImmutable"] = True
     evidence["assetStorage"] = "durable_copy" if target_path != original else "source_path"
-    display_stem = safe_asset_token(source.get("id") or evidence.get("sourceId"))
+    if not asset_root:
+        evidence["displayPhotoEligible"] = False
+        evidence["displayPhotoStatus"] = "output_required_for_display_crop"
+        return evidence
+    display_stem = f"{safe_asset_token(source.get('id') or evidence.get('sourceId'))}.{original_sha[:16]}"
     display_path = (
         os.path.join(asset_root, f"{display_stem}.display.jpg")
         if asset_root
@@ -1745,14 +1816,30 @@ def write_result(value, output):
         try:
             with os.fdopen(file_descriptor, "w", encoding="utf-8") as handle:
                 handle.write(serialized)
+                handle.flush()
+                os.fsync(handle.fileno())
             os.chmod(temporary, 0o600)
             os.replace(temporary, output)
+            fsync_directory(parent)
         except Exception:
             if os.path.exists(temporary):
                 os.unlink(temporary)
             raise
     else:
         print(serialized, end="")
+
+
+def fsync_directory(path):
+    try:
+        descriptor = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(descriptor)
+    except OSError:
+        pass
+    finally:
+        os.close(descriptor)
 
 
 def extract(args):
@@ -2213,7 +2300,7 @@ def doctor(args):
     print(json.dumps(doctor_report(args.output_locale), ensure_ascii=False, indent=2))
 
 
-def add_common_arguments(target):
+def add_common_arguments(target, output_required=False):
     target.add_argument("--name", default="")
     target.add_argument("--city", default="")
     target.add_argument("--country-code", default="")
@@ -2231,14 +2318,14 @@ def add_common_arguments(target):
     )
     target.add_argument("--languages", default="")
     target.add_argument("--timeout", type=int, default=15)
-    target.add_argument("--output")
+    target.add_argument("--output", required=output_required)
 
 
 def parser():
-    root = argparse.ArgumentParser(
+    root = LocalizedArgumentParser(
         description="Extract local place evidence from a screenshot, public link, or text"
     )
-    sub = root.add_subparsers(dest="command", required=True)
+    sub = root.add_subparsers(dest="command", required=True, parser_class=LocalizedArgumentParser)
     p_extract = sub.add_parser("extract")
     source = p_extract.add_mutually_exclusive_group(required=True)
     source.add_argument("--screenshot")
@@ -2251,7 +2338,7 @@ def parser():
     p_extract.set_defaults(func=extract)
     p_batch = sub.add_parser("batch")
     p_batch.add_argument("--manifest", required=True)
-    add_common_arguments(p_batch)
+    add_common_arguments(p_batch, output_required=True)
     p_batch.set_defaults(func=batch_extract)
     p_doctor = sub.add_parser("doctor")
     p_doctor.add_argument(
@@ -2275,4 +2362,6 @@ if __name__ == "__main__":
         json.JSONDecodeError,
         subprocess.SubprocessError,
     ) as error:
-        raise SystemExit(str(error))
+        payload = cli_error_payload(error, getattr(arguments, "output_locale", "zh-CN"))
+        print(json.dumps(payload, ensure_ascii=False), file=sys.stderr)
+        raise SystemExit(1)
