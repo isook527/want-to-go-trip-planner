@@ -2554,12 +2554,13 @@ class PublicSkillRegressionTests(unittest.TestCase):
         agent_text = (SKILL / "agents" / "openai.yaml").read_text(encoding="utf-8")
         config = product_config()
         for phrase in (
-            "Language / 语言", "English quick start", '"outputLocale": "en-US"',
-            "save this place", "create my Bangkok passport",
+            "Language / 语言", "English operating contract", "English quick start",
+            '"outputLocale": "en-US"', "save this place", "create my Bangkok passport",
+            "Do not ask an English-speaking user to request an “English passport.”",
         ):
             self.assertIn(phrase, skill_text)
-        self.assertIn("想去就出发｜Want to Go", agent_text)
-        self.assertIn("respond in the language I use", agent_text)
+        self.assertIn("Want to Go｜想去就出发", agent_text)
+        self.assertIn("Detect my language automatically", agent_text)
         self.assertEqual(config["brand"]["platformNameEn"], "Want to Go | Travel Save Organizer")
         self.assertTrue(config["brand"]["subtitleEn"])
         for provider in config["platformImports"].values():
@@ -2620,6 +2621,52 @@ class PublicSkillRegressionTests(unittest.TestCase):
             self.assertIn(phrase, html)
         for chinese_label in ("当地名称", "营业", "想去理由", "提交行程需求"):
             self.assertNotIn(chinese_label, html)
+
+    def test_81_english_user_is_first_class_without_requesting_translation(self):
+        skill_text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+        description = skill_text.split("---", 2)[1]
+        self.assertTrue(description.index("Save travel screenshots") < description.index("把旅行截图"))
+        for phrase in (
+            "### English installation and onboarding",
+            "### Save inputs by destination",
+            "### Protect images and resolve places",
+            "### Generate an English passport",
+            "### Edit, recover, review and export",
+        ):
+            self.assertIn(phrase, skill_text)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            library_path = Path(tmp) / "want-to-go.json"
+            evidence_path = Path(tmp) / "evidence.json"
+            W2G.save_library(library_path, W2G.empty_library())
+            evidence_path.write_text(json.dumps({
+                "bundleId": "english-direct-use",
+                "outputLocale": "en-US",
+                "destination": "",
+                "evidence": [{
+                    "sourceId": "text-1", "sourceType": "text",
+                    "destination": "Bangkok", "text": "theCOMMONS Thonglor",
+                }],
+                "failures": [],
+            }), encoding="utf-8")
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                W2G.command_ingest(argparse.Namespace(
+                    library=str(library_path), evidence=str(evidence_path),
+                ))
+            ingest_result = json.loads(output.getvalue())
+            self.assertEqual(ingest_result["destinations"], ["Bangkok"])
+
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                W2G.command_present(argparse.Namespace(
+                    library=str(library_path), destination="Bangkok", locale="en-US",
+                ))
+            message = output.getvalue().strip()
+            self.assertIn("Saved 1 item(s) to your Bangkok want-to-go library", message)
+            self.assertIn("Create my Bangkok Want-to-go passport", message)
+            for chinese_fragment in ("已收进", "想去库：", "生成曼谷想去护照"):
+                self.assertNotIn(chinese_fragment, message)
 
 
 if __name__ == "__main__":
