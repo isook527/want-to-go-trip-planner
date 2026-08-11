@@ -1,14 +1,16 @@
 {
-  "version": "2.2.0",
+  "version": "2.3.0",
   "contractVersion": "2.2.0",
   "sourcePolicyVersion": "2.2.0",
-  "passportTemplateMarker": "kornvia-passport-2.2.0",
-  "installDoctorMarker": "kornvia-install-doctor-2.2.0",
+  "passportTemplateMarker": "kornvia-passport-2.3.0",
+  "installDoctorMarker": "kornvia-install-doctor-2.3.0",
   "brand": {
     "productNameZh": "Kornvia 想去就出发",
     "productNameEn": "Kornvia Want to Go",
     "platformNameZh": "想去就出发｜旅行收藏与路线规划",
+    "platformNameEn": "Want to Go | Travel Save Organizer",
     "subtitleZh": "把收藏的地方，变成真正走得通的旅程",
+    "subtitleEn": "Turn saved places into a trip you can actually take",
     "sunnyYellow": "#F2B51D"
   },
   "form": {
@@ -31,8 +33,8 @@
     "copy": {
       "sectionKickerZh": "两种整理方式",
       "sectionKickerEn": "TWO WAYS TO PLAN",
-      "sectionTitleZh": "自己整理，或交给人工逐日安排",
-      "sectionTitleEn": "Organize it yourself, or ask us to plan each day",
+      "sectionTitleZh": "想去库整理好后，也可以交给人工继续排。",
+      "sectionTitleEn": "Once your want-to-go library is ready, you can ask us to plan each day.",
       "recommendedLabelZh": "推荐",
       "recommendedLabelEn": "RECOMMENDED",
       "requestTitleZh": "提交行程需求",
@@ -87,24 +89,28 @@
       "domains": ["xiaohongshu.com", "xhslink.com", "xhslink.cn"],
       "mode": "signed_note_url",
       "requires": "xiaohongshu.com 笔记完整链接及 xsec_token；短链仅保留，需补完整链接或截图",
+      "requiresEn": "A full xiaohongshu.com note URL with xsec_token. Short links are retained but require a full URL or screenshot.",
       "canSupport": ["note_text_observed", "engagement_counts_observed", "platform_media_downloaded"]
     },
     "ctrip": {
       "domains": ["ctrip.com"],
       "mode": "name_search_with_url_preservation",
       "requires": "链接来源同时提供地点名；用目的地与链接内地点 ID 消歧",
+      "requiresEn": "Provide the place name with the URL. Destination and the place ID in the submitted URL are used for disambiguation.",
       "canSupport": ["provider_place_id_observed", "place_name_observed", "city_country_observed", "coordinates_observed"]
     },
     "wechat_official": {
       "domains": ["mp.weixin.qq.com", "weixin.sogou.com"],
       "mode": "public_article_browser_read",
       "requires": "可公开打开的公众号文章 URL",
+      "requiresEn": "A publicly accessible WeChat Official Account article URL.",
       "canSupport": ["article_title_observed", "article_body_observed", "article_image_urls_observed"]
     },
     "mafengwo": {
       "domains": ["mafengwo.cn"],
       "mode": "local_evidence_on_security_check",
       "requires": "保留原链接；安全检测时补截图、保存网页或粘贴文字",
+      "requiresEn": "The original URL is retained. Provide screenshots, a saved page or pasted text when a security check blocks reading.",
       "canSupport": ["original_url_submitted", "local_evidence_imported"]
     }
   },
@@ -134,7 +140,6 @@
       "id": "pre-trip-review",
       "nameZh": "出发前复核",
       "nameEn": "Pre-trip review",
-      "price": "¥39.9",
       "publicSalesEntry": false,
       "includedInOfferId": "manual-itinerary-beta",
       "reviewMode": "agreed_date_once",
@@ -175,8 +180,8 @@
     "onboardingZh": "Kornvia 想去就出发已准备好。把本轮旅行截图、公开链接、视频或文字发给我，我会先收进按目的地整理的想去库，不会擅自生成攻略。小红书完整笔记链接、携程地点链接和公开公众号文章会按平台规则读取；马蜂窝遇安全检测时会保留原链接，并请你补截图、保存网页或文字。多地点文章不会冒充一个地点，需要指定地点名或拆分收纳。需要整理时，说“生成曼谷想去护照”。免费档包含收纳、分库、地点卡与配图、护照、基础片区分组、修改和本地导出。¥199 人工逐日行程内测覆盖一个城市、3–7 天、2–15 个地点，含一次范围内修改和一次双方约定日期的出发前复核；不代订、不持续监控。内测期限量接单，提交后确认档期。",
     "onboardingEn": "Kornvia Want to Go is ready. Send travel screenshots, public links, videos or text from this turn and I will save them by destination in your want-to-go library without creating a guide unless asked. Full Xiaohongshu note URLs, Ctrip place URLs and public WeChat Official Account articles use verified platform adapters. If Mafengwo presents a security check, the submitted URL is retained and a screenshot, saved page or pasted text is requested. Multi-place articles are not presented as one place; name the target place or split the source. The free tier includes capture, destination libraries, place cards and images, passport, basic area grouping, edits and local export. The ¥199 manual itinerary beta covers one city, 3–7 days and 2–15 places with one in-scope revision and one pre-trip review on an agreed date. It does not include booking or continuous monitoring. Beta availability is limited and confirmed after submission.",
     "savedNextStepZh": "想把收藏整理成网页攻略，可以说“生成{destination}想去护照”。",
-    "savedNextStepEn": "Say “Create my {destination} Go passport” when you want a web guide.",
+    "savedNextStepEn": "Say “Create my {destination} Want-to-go passport” when you want a shareable web guide.",
     "passportReadyZh": "想去护照已生成。免费档可继续修改、排序、撤销和本地导出。需要人工逐日安排时，¥199 内测覆盖一个城市、3–7 天、2–15 个地点，含一次范围内修改和一次双方约定日期的出发前复核；不代订、不持续监控。内测期限量接单，提交后确认档期。",
-    "passportReadyEn": "Your Go passport is ready. The free tier remains editable, sortable, undoable and locally exportable. The ¥199 manual itinerary beta covers one city, 3–7 days and 2–15 places with one in-scope revision and one pre-trip review on an agreed date; booking and continuous monitoring are excluded. Beta availability is limited and confirmed after submission."
+    "passportReadyEn": "Your Want-to-go passport is ready. The free tier remains editable, sortable, undoable and locally exportable. The ¥199 manual itinerary beta covers one city, 3–7 days and 2–15 places with one in-scope revision and one pre-trip review on an agreed date; booking and continuous monitoring are excluded. Beta availability is limited and confirmed after submission."
   }
 }

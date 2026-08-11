@@ -223,13 +223,15 @@ class PublicSkillRegressionTests(unittest.TestCase):
             "retainedClueCount": 2,
         }
         html = self.render(payload)
-        self.assertIn("kornvia-passport-2.2.0", html)
+        self.assertIn("kornvia-passport-2.3.0", html)
+        self.assertIn("一张能带走的想去行程单", html)
+        self.assertIn("想去库整理好后，也可以交给人工继续排。", html)
         self.assertIn(config["offers"]["free"]["price"], html)
         self.assertNotIn("¥0", html)
         self.assertIn(config["offers"]["free"]["nameZh"], html)
         self.assertIn(config["offers"]["manualItineraryBeta"]["price"], html)
         self.assertIn(config["offers"]["manualItineraryBeta"]["nameZh"], html)
-        self.assertNotIn(config["offers"]["preTripReview"]["price"], html)
+        self.assertNotIn("pre-trip-review", html)
         self.assertIn('name="offerId" value="manual-itinerary-beta"', html)
         self.assertNotIn('<select name="offerId"', html)
         self.assertIn(config["form"]["requestUrl"], html)
@@ -275,9 +277,10 @@ class PublicSkillRegressionTests(unittest.TestCase):
         ):
             self.assertNotIn(banned, customer_text)
         for offer in product_config()["offers"].values():
-            self.assertNotIn(f'{offer["price"]} 完整逐日行程', customer_text)
-        self.assertNotIn("¥39.9", customer_text)
-        self.assertNotIn("正式价 ¥399", customer_text)
+            if offer.get("price"):
+                self.assertNotIn(f'{offer["price"]} 完整逐日行程', customer_text)
+        self.assertNotIn("pre-trip-review", customer_text)
+        self.assertNotIn("正式价", customer_text)
         self.assertNotIn("固定每周限单", customer_text)
 
     def test_13_display_image_finds_photo_rich_region_and_makes_four_three_crop(self):
@@ -396,7 +399,9 @@ class PublicSkillRegressionTests(unittest.TestCase):
             self.assertIn("https://xhslink.cn/o/example", html)
             self.assertIn("data:image/png;base64,", html)
             self.assertIn("OCRa", html)
-            self.assertEqual(html.count('class="lim"'), 1)
+            self.assertNotIn('class="lim"', html)
+            self.assertNotIn('class="hand-note"', html)
+            self.assertIn('class="hero-stub"', html)
 
     def test_15_inline_request_form_posts_to_api_and_external_page_is_fallback(self):
         html = self.render(
@@ -407,12 +412,13 @@ class PublicSkillRegressionTests(unittest.TestCase):
                 "retainedClueCount": 0,
             }
         )
-        self.assertIn("kornvia-passport-2.2.0", html)
-        self.assertIn("background:#F2B51D;color:var(--ink)", html)
+        self.assertIn("kornvia-passport-2.3.0", html)
+        self.assertIn("--canvas:#E9E8E3", html)
+        self.assertNotIn("background:#F2B51D", html)
         self.assertIn(".photo{aspect-ratio:4/3", html)
         self.assertIn("flex:0 0 auto", html)
         self.assertNotIn("gap:18px;height:100%", html)
-        self.assertEqual(html.count("box-shadow:10px 12px 0 var(--ink)"), 2)
+        self.assertEqual(html.count("box-shadow:var(--shadow)"), 2)
         self.assertIn("border:5px solid var(--ink)", html)
         self.assertIn(
             'action="https://trip-api.kornvia.com/trip-requests" method="post"',
@@ -1392,8 +1398,8 @@ class PublicSkillRegressionTests(unittest.TestCase):
         self.assertIn("$productConfig.installDoctorMarker", windows_doctor)
         self.assertIn("PRODUCT_CONFIG.passportTemplateMarker", renderer)
         config = json.loads((SKILL / "config" / "product.json").read_text(encoding="utf-8"))
-        self.assertEqual(config["installDoctorMarker"], "kornvia-install-doctor-2.2.0")
-        self.assertEqual(config["passportTemplateMarker"], "kornvia-passport-2.2.0")
+        self.assertEqual(config["installDoctorMarker"], "kornvia-install-doctor-2.3.0")
+        self.assertEqual(config["passportTemplateMarker"], "kornvia-passport-2.3.0")
 
     def test_38_ffmpeg_doctor_uses_supported_version_flag(self):
         missing = {"installed": False, "version": "", "ready": False}
@@ -1437,6 +1443,8 @@ class PublicSkillRegressionTests(unittest.TestCase):
         self.assertIn('$env:PYTHONUTF8 = "1"', text)
         self.assertIn('$env:PYTHONIOENCODING = "utf-8"', text)
         self.assertIn("[Console]::OutputEncoding = $utf8", text)
+        self.assertIn('if ($Locale -eq "en-US")', text)
+        self.assertIn("Python 3.9 or later is required", text)
 
     def test_41_windows_powershell_prefers_active_python_environment(self):
         text = (SKILL / "scripts" / "doctor_windows.ps1").read_text(encoding="ascii")
@@ -1449,7 +1457,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
 
     def test_43_product_config_is_the_single_commercial_and_version_source(self):
         config = product_config()
-        self.assertEqual(config["version"], "2.2.0")
+        self.assertEqual(config["version"], "2.3.0")
         self.assertTrue(config["offers"])
         self.assertEqual(config["form"]["publicOfferId"], "manual-itinerary-beta")
         self.assertTrue(config["form"]["intentOnly"])
@@ -1463,16 +1471,21 @@ class PublicSkillRegressionTests(unittest.TestCase):
         self.assertFalse(config["paymentWorkflow"]["publicStaticPaymentCode"])
         offer_ids = []
         for offer in config["offers"].values():
-            for required in ("id", "nameZh", "nameEn", "price"):
+            for required in ("id", "nameZh", "nameEn"):
                 self.assertIsInstance(offer.get(required), str)
                 self.assertTrue(offer[required])
+            if offer["publicSalesEntry"]:
+                self.assertIsInstance(offer.get("price"), str)
+                self.assertTrue(offer["price"])
+            else:
+                self.assertNotIn("price", offer)
             offer_ids.append(offer["id"])
         self.assertEqual(len(offer_ids), len(set(offer_ids)))
         python_source = SCRIPT.read_text(encoding="utf-8")
         renderer_source = RENDERER.read_text(encoding="utf-8")
         commercial_literals = {
             config["form"]["requestUrl"],
-            *(offer["price"] for offer in config["offers"].values()),
+            *(offer["price"] for offer in config["offers"].values() if offer.get("publicSalesEntry")),
             config["form"]["copy"]["submitZh"],
             config["form"]["copy"]["sectionTitleZh"],
             config["form"]["privacy"]["boundaryZh"],
@@ -2535,6 +2548,125 @@ class PublicSkillRegressionTests(unittest.TestCase):
             payload = json.loads(passport_path.read_text(encoding="utf-8"))
             self.assertEqual(payload["places"][0]["photo"]["path"], str(display))
             self.assertNotEqual(payload["places"][0]["photo"]["path"], str(original))
+
+    def test_78_bilingual_skill_metadata_and_operator_guides_are_public_ready(self):
+        skill_text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+        agent_text = (SKILL / "agents" / "openai.yaml").read_text(encoding="utf-8")
+        config = product_config()
+        for phrase in (
+            "Language / 语言", "English operating contract", "English quick start",
+            '"outputLocale": "en-US"', "save this place", "create my Bangkok passport",
+            "Do not ask an English-speaking user to request an “English passport.”",
+        ):
+            self.assertIn(phrase, skill_text)
+        self.assertIn("Want to Go｜想去就出发", agent_text)
+        self.assertIn("Detect my language automatically", agent_text)
+        self.assertEqual(config["brand"]["platformNameEn"], "Want to Go | Travel Save Organizer")
+        self.assertTrue(config["brand"]["subtitleEn"])
+        for provider in config["platformImports"].values():
+            self.assertTrue(provider["requires"])
+            self.assertTrue(provider["requiresEn"])
+        self.assertNotIn("price", config["offers"]["preTripReview"])
+        for reference in (
+            "customer-output.md", "place-resolution.md", "provider-support.md",
+            "free-library-contract.md",
+        ):
+            self.assertIn(
+                "## English", (SKILL / "references" / reference).read_text(encoding="utf-8")
+            )
+
+    def test_79_english_platform_failures_are_actionable(self):
+        with self.assertRaisesRegex(ValueError, "short link was retained"):
+            EXTRACT.xiaohongshu_evidence(
+                "https://xhslink.com/example", {}, 15, "en-US",
+            )
+        args = argparse.Namespace(
+            name="", destination="Bangkok", city="", timeout=15,
+            output_locale="en-US",
+        )
+        with self.assertRaisesRegex(ValueError, "Ctrip URL was retained"):
+            EXTRACT.ctrip_evidence(
+                "https://you.ctrip.com/sight/bangkok/123.html", {}, args,
+            )
+        with mock.patch.object(EXTRACT, "run_opencli", return_value="验证码"):
+            with self.assertRaisesRegex(ValueError, "WeChat article triggered a security check"):
+                EXTRACT.wechat_evidence("https://mp.weixin.qq.com/s/example", {}, args)
+        with self.assertRaisesRegex(ValueError, "Mafengwo blocked the public article"):
+            EXTRACT.fetch_platform_link("https://www.mafengwo.cn/i/123.html", {}, args)
+
+    def test_80_english_passport_renders_full_customer_flow(self):
+        place = complete_business(
+            destination="Bangkok",
+            verifiedName="theCOMMONS Thonglor",
+            address="335 Sukhumvit Road, Bangkok",
+            openingHoursText="Daily 08:00–01:00",
+            signature="A community mall with cafés, shops and restaurants.",
+            visitTip="Recheck individual shop hours before departure.",
+            originalSourceLinks=[{
+                "url": "https://example.com/source", "label": "Original saved link",
+            }],
+        )
+        html = self.render({
+            "locale": "en-US", "destination": "Bangkok",
+            "presentation": {"visitorMode": True, "contentMode": "standard"},
+            "places": [W2G.customer_place(place, "en-US")],
+            "retainedClueCount": 0,
+        })
+        for phrase in (
+            "WANT TO GO PASSPORT", "A want-to-go itinerary you can take with you",
+            "Verification status", "Open original saved link",
+            "Want-to-go library and passport", "Manual day-by-day itinerary beta",
+            "Send itinerary request — no charge now", "Service boundary",
+        ):
+            self.assertIn(phrase, html)
+        for chinese_label in ("当地名称", "营业", "想去理由", "提交行程需求"):
+            self.assertNotIn(chinese_label, html)
+
+    def test_81_english_user_is_first_class_without_requesting_translation(self):
+        skill_text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+        description = skill_text.split("---", 2)[1]
+        self.assertTrue(description.index("Save travel screenshots") < description.index("把旅行截图"))
+        for phrase in (
+            "### English installation and onboarding",
+            "### Save inputs by destination",
+            "### Protect images and resolve places",
+            "### Generate an English passport",
+            "### Edit, recover, review and export",
+        ):
+            self.assertIn(phrase, skill_text)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            library_path = Path(tmp) / "want-to-go.json"
+            evidence_path = Path(tmp) / "evidence.json"
+            W2G.save_library(library_path, W2G.empty_library())
+            evidence_path.write_text(json.dumps({
+                "bundleId": "english-direct-use",
+                "outputLocale": "en-US",
+                "destination": "",
+                "evidence": [{
+                    "sourceId": "text-1", "sourceType": "text",
+                    "destination": "Bangkok", "text": "theCOMMONS Thonglor",
+                }],
+                "failures": [],
+            }), encoding="utf-8")
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                W2G.command_ingest(argparse.Namespace(
+                    library=str(library_path), evidence=str(evidence_path),
+                ))
+            ingest_result = json.loads(output.getvalue())
+            self.assertEqual(ingest_result["destinations"], ["Bangkok"])
+
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                W2G.command_present(argparse.Namespace(
+                    library=str(library_path), destination="Bangkok", locale="en-US",
+                ))
+            message = output.getvalue().strip()
+            self.assertIn("Saved 1 item(s) to your Bangkok want-to-go library", message)
+            self.assertIn("Create my Bangkok Want-to-go passport", message)
+            for chinese_fragment in ("已收进", "想去库：", "生成曼谷想去护照"):
+                self.assertNotIn(chinese_fragment, message)
 
 
 if __name__ == "__main__":
