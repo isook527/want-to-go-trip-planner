@@ -214,7 +214,7 @@ python3 scripts/want_to_go.py repair --library want-to-go.json
 python3 scripts/want_to_go.py validate --library want-to-go.json
 python3 scripts/want_to_go.py export --library want-to-go.json --output export.json
 python3 scripts/want_to_go.py scan --path 想去护照.html --mode customer
-python3 scripts/want_to_go.py scan --path want-to-go-trip-planner-skill-2.2.0.zip --mode package
+python3 scripts/want_to_go.py scan --path want-to-go-trip-planner-skill-2.3.0.zip --mode package
 ```
 
 - `migrate --dry-run` 只报告；正式迁移原子写入并记录事件。v1.2.3 原始来源和媒体不得丢失。旧按需复核只能标为 `pre_trip_on_demand_legacy`，不得伪造双方约定日期；旧范围需求保留原值并标记 `legacyImported`。

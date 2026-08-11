@@ -5,7 +5,6 @@ import path from "node:path";
 import {
   escapeHtml,
   KORNVIA_REPORT_CSS,
-  LIM_PERSONA_DATA_URL,
   passportTitle,
   PRODUCT_CONFIG,
   REPORT_TEMPLATE_VERSION,
@@ -154,6 +153,16 @@ function riskPanel(risks, en, className = "risk-list") {
   </section>`;
 }
 
+function publicAreas(places, en) {
+  const counts = new Map();
+  for (const place of places) {
+    const label = clean(place.area || place.district || place.neighborhood || place.branch, 80)
+      || (en ? "SAVED PLACES" : "未分片区");
+    counts.set(label, (counts.get(label) || 0) + 1);
+  }
+  return [...counts.entries()].slice(0, 8);
+}
+
 function requestOption(value, label) {
   return `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`;
 }
@@ -257,18 +266,48 @@ function render(report, inputPath) {
   const title = passportTitle(report.destination, locale);
   const places = Array.isArray(report.places) ? report.places : [];
   const retained = Math.max(0, Number(report.retainedClueCount || 0));
-  const subtitle = en
-    ? "Saved places, addresses, opening notes and practical reminders—ready in one guide."
-    : "收藏的地点、地址、营业信息和出发提醒，都整理在这里。";
+  const destination = clean(report.destination, 80) || (en ? "MY TRIP" : "我的旅程");
+  const contentMode = ["deep", "standard", "compact"].includes(report.presentation?.contentMode)
+    ? report.presentation.contentMode
+    : "standard";
+  const sourceLinkCount = places.reduce((sum, place) => sum + publicLinks(place).length, 0);
+  const areas = publicAreas(places, en);
   const baseDir = path.dirname(inputPath);
   const visitorMode = report.presentation?.visitorMode === true;
   return `<!doctype html><html lang="${en ? "en" : "zh-CN"}"><head><meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title>
   <style>${KORNVIA_REPORT_CSS}</style></head><body><main class="shell">
-    <header class="hero"><p class="kicker">KORNVIA · ${en ? "WANT TO GO" : "想去就出发"}</p>
-      <h1>${escapeHtml(title)}</h1><p>${escapeHtml(subtitle)}</p>
-      <img class="lim" src="${LIM_PERSONA_DATA_URL}" alt="" aria-hidden="true"></header>
+    <header class="hero ticket">
+      <div class="hero-main">
+        <div class="brand-row"><strong class="wordmark">Kornvia</strong><span>WANT TO GO PASS</span></div>
+        <div class="hero-title"><p class="kicker">${en ? "DESTINATION LIBRARY" : "目的地分库"}</p><h1>${escapeHtml(destination)}</h1>
+          <p class="passport-label">${en ? "WANT TO GO PASSPORT" : "想去护照"}</p></div>
+        <div class="hero-meta" aria-label="${en ? "Passport summary" : "护照摘要"}">
+          <div><span>${en ? "PLACES" : "地点"}</span><strong>${places.length}</strong></div>
+          <div><span>${en ? "SOURCES" : "原始链接"}</span><strong>${sourceLinkCount}</strong></div>
+          <div><span>${en ? "STATUS" : "状态"}</span><strong>READY</strong></div>
+        </div>
+      </div>
+      <aside class="hero-stub" aria-label="${en ? "Trip document stub" : "行程票存根"}">
+        <div><span class="stub-label">DESTINATION</span><p class="stub-destination">${escapeHtml(destination)}</p></div>
+        <div class="stub-facts">
+          <div><span class="stub-label">VIEW</span><strong>${escapeHtml(contentMode.toUpperCase())}</strong></div>
+          <div><span class="stub-label">PLACES</span><strong>${places.length}</strong></div>
+          <div><span class="stub-label">SOURCE</span><strong>${sourceLinkCount ? "LINK" : "NONE"}</strong></div>
+        </div>
+        <p class="stub-note">KORNVIA TRIP DOCUMENT<br>${en ? "ORIGINAL IMAGES AND SOURCES RETAINED" : "原图保留，来源可追溯"}</p>
+      </aside>
+    </header>
     ${visitorMode ? `<aside class="retained">${en ? "Visitor view: customer-safe fields only." : "访客查看版：仅展示客户可见字段。"}</aside>` : ""}
+    <section class="manifest" aria-labelledby="manifest-title">
+      <div class="manifest-copy"><p class="kicker">TRIP MANIFEST</p>
+        <h2 id="manifest-title">${en ? "A want-to-go itinerary you can take with you" : "一张能带走的想去行程单"}</h2>
+        <p>${en ? "Places stay grouped by area, with display images, addresses, reminders and only the source links you actually submitted." : "地点按片区整理，保留展示配图、地址和出发提醒；只有你实际提交过的原始链接才会显示。"}</p>
+      </div>
+      <div class="area-route" aria-label="${en ? "Area summary" : "片区摘要"}">${areas.map(([area, count], index) => `
+        <div class="route-stop"><span class="stop-number">${String(index + 1).padStart(2, "0")}</span><span class="route-name">${escapeHtml(area)}</span><span class="route-count">${count} ${en ? "PLACE" : "个地点"}</span></div>`).join("")}
+      </div>
+    </section>
     <section class="grid">${places.map((place) => card(place, locale, baseDir)).join("")}</section>
     ${riskPanel(report.tripRisks, en, "trip-risks")}
     ${retained ? `<aside class="retained">${en

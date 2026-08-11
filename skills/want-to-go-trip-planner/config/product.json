@@ -1,9 +1,9 @@
 {
-  "version": "2.2.0",
+  "version": "2.3.0",
   "contractVersion": "2.2.0",
   "sourcePolicyVersion": "2.2.0",
-  "passportTemplateMarker": "kornvia-passport-2.2.0",
-  "installDoctorMarker": "kornvia-install-doctor-2.2.0",
+  "passportTemplateMarker": "kornvia-passport-2.3.0",
+  "installDoctorMarker": "kornvia-install-doctor-2.3.0",
   "brand": {
     "productNameZh": "Kornvia 想去就出发",
     "productNameEn": "Kornvia Want to Go",
@@ -31,8 +31,8 @@
     "copy": {
       "sectionKickerZh": "两种整理方式",
       "sectionKickerEn": "TWO WAYS TO PLAN",
-      "sectionTitleZh": "自己整理，或交给人工逐日安排",
-      "sectionTitleEn": "Organize it yourself, or ask us to plan each day",
+      "sectionTitleZh": "想去库整理好后，也可以交给人工继续排。",
+      "sectionTitleEn": "Once your want-to-go library is ready, you can ask us to plan each day.",
       "recommendedLabelZh": "推荐",
       "recommendedLabelEn": "RECOMMENDED",
       "requestTitleZh": "提交行程需求",
