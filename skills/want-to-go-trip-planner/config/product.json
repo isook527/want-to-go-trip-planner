@@ -8,7 +8,9 @@
     "productNameZh": "Kornvia 想去就出发",
     "productNameEn": "Kornvia Want to Go",
     "platformNameZh": "想去就出发｜旅行收藏与路线规划",
+    "platformNameEn": "Want to Go | Travel Save Organizer",
     "subtitleZh": "把收藏的地方，变成真正走得通的旅程",
+    "subtitleEn": "Turn saved places into a trip you can actually take",
     "sunnyYellow": "#F2B51D"
   },
   "form": {
@@ -87,24 +89,28 @@
       "domains": ["xiaohongshu.com", "xhslink.com", "xhslink.cn"],
       "mode": "signed_note_url",
       "requires": "xiaohongshu.com 笔记完整链接及 xsec_token；短链仅保留，需补完整链接或截图",
+      "requiresEn": "A full xiaohongshu.com note URL with xsec_token. Short links are retained but require a full URL or screenshot.",
       "canSupport": ["note_text_observed", "engagement_counts_observed", "platform_media_downloaded"]
     },
     "ctrip": {
       "domains": ["ctrip.com"],
       "mode": "name_search_with_url_preservation",
       "requires": "链接来源同时提供地点名；用目的地与链接内地点 ID 消歧",
+      "requiresEn": "Provide the place name with the URL. Destination and the place ID in the submitted URL are used for disambiguation.",
       "canSupport": ["provider_place_id_observed", "place_name_observed", "city_country_observed", "coordinates_observed"]
     },
     "wechat_official": {
       "domains": ["mp.weixin.qq.com", "weixin.sogou.com"],
       "mode": "public_article_browser_read",
       "requires": "可公开打开的公众号文章 URL",
+      "requiresEn": "A publicly accessible WeChat Official Account article URL.",
       "canSupport": ["article_title_observed", "article_body_observed", "article_image_urls_observed"]
     },
     "mafengwo": {
       "domains": ["mafengwo.cn"],
       "mode": "local_evidence_on_security_check",
       "requires": "保留原链接；安全检测时补截图、保存网页或粘贴文字",
+      "requiresEn": "The original URL is retained. Provide screenshots, a saved page or pasted text when a security check blocks reading.",
       "canSupport": ["original_url_submitted", "local_evidence_imported"]
     }
   },
@@ -134,7 +140,6 @@
       "id": "pre-trip-review",
       "nameZh": "出发前复核",
       "nameEn": "Pre-trip review",
-      "price": "¥39.9",
       "publicSalesEntry": false,
       "includedInOfferId": "manual-itinerary-beta",
       "reviewMode": "agreed_date_once",

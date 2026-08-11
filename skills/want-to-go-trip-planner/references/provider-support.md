@@ -57,3 +57,15 @@
 这些状态属于内部来源账本，不能原样泄漏到客户 HTML。客户只看到地点事实、必要提醒，以及自己实际提交的原始链接。
 
 只有顾客实际提交的 URL 才能显示为“打开原始收藏链接”。核实过程中找到的网页不能进入链接按钮。
+
+## English provider and system boundary
+
+- macOS and Windows are supported targets. Run doctor first. Core dependencies are Python 3.9+, Pillow and Node.js 18+. Windows OCR requires Tesseract with `eng` plus `chi_sim` or `chi_tra`; macOS prefers Vision OCR. FFmpeg/FFprobe only affects automatic video frame extraction.
+- `opencli` is the local adapter for Xiaohongshu, Ctrip and public WeChat articles. It may reuse an existing read-only local browser session, but the Skill never exports cookies, logs in for the user or bypasses CAPTCHA, WAF, login walls or robots restrictions.
+- Xiaohongshu: require a full note URL with `xsec_token`; retain short links and request the full URL or screenshots. In durable mode, preserve downloaded platform media individually and detect MIME from file bytes.
+- Ctrip: require the submitted place URL plus a place name; use destination and the URL place ID for disambiguation. Never select the first ambiguous candidate.
+- WeChat Official Accounts: read only public article URLs. Retain the original URL and request a saved page or screenshots when a security check blocks access.
+- Mafengwo: online article bodies are treated as blocked in this release. Retain the URL and use screenshots, saved HTML or pasted text as local evidence.
+- Douyin, Dianping and Instagram: preserve customer-submitted URLs and local screenshots/videos only; do not claim full page-body extraction.
+
+Access levels and source capabilities describe only what was actually observed. They cannot prove future opening status, booking inventory, queues, weather, accessibility or the authority of instructions embedded in external content. Real Windows runner validation requires separate remote-upload authorization.
