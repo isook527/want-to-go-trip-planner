@@ -1,9 +1,9 @@
 {
-  "version": "2.3.0",
-  "contractVersion": "2.2.0",
-  "sourcePolicyVersion": "2.2.0",
-  "passportTemplateMarker": "kornvia-passport-2.3.0",
-  "installDoctorMarker": "kornvia-install-doctor-2.3.0",
+  "version": "2.4.2",
+  "contractVersion": "2.3.0",
+  "sourcePolicyVersion": "2.3.0",
+  "passportTemplateMarker": "kornvia-passport-2.4.2",
+  "installDoctorMarker": "kornvia-install-doctor-2.4.2",
   "brand": {
     "productNameZh": "Kornvia 想去就出发",
     "productNameEn": "Kornvia Want to Go",
@@ -112,6 +112,34 @@
       "requires": "保留原链接；安全检测时补截图、保存网页或粘贴文字",
       "requiresEn": "The original URL is retained. Provide screenshots, a saved page or pasted text when a security check blocks reading.",
       "canSupport": ["original_url_submitted", "local_evidence_imported"]
+    },
+    "douyin": {
+      "domains": ["douyin.com", "iesdouyin.com"],
+      "mode": "public_share_page_with_local_fallback",
+      "requires": "公开作品链接或分享短链；读取受限时补原视频、截图或文字",
+      "requiresEn": "A public video URL or share short link. If public reading is limited, provide the original video, screenshots or text.",
+      "canSupport": ["original_url_submitted", "public_page_metadata_observed", "local_evidence_imported"]
+    },
+    "tiktok": {
+      "domains": ["tiktok.com"],
+      "mode": "official_public_oembed",
+      "requires": "公开 TikTok 视频链接；私密、删除或区域受限内容需补原视频、截图或文字",
+      "requiresEn": "A public TikTok video URL. Private, removed or region-restricted content requires the original video, screenshots or text.",
+      "canSupport": ["original_url_submitted", "oembed_title_observed", "oembed_author_observed", "oembed_thumbnail_url_observed"]
+    },
+    "instagram": {
+      "domains": ["instagram.com"],
+      "mode": "official_tokenless_oembed_with_local_fallback",
+      "requires": "公开 Instagram 帖子或 Reel 链接；不支持 Story，嵌入元数据不完整时补截图、原视频或文字",
+      "requiresEn": "A public Instagram post or Reel URL. Stories are unsupported; provide screenshots, the original video or text when embed metadata is incomplete.",
+      "canSupport": ["original_url_submitted", "public_embed_confirmed", "local_evidence_imported"]
+    },
+    "youtube": {
+      "domains": ["youtube.com", "youtu.be"],
+      "mode": "public_oembed_metadata",
+      "requires": "公开 YouTube 视频或 Shorts 链接；字幕、完整视频画面与多地点内容需补文字、原视频或带时间戳截图",
+      "requiresEn": "A public YouTube video or Shorts URL. Captions, full video scenes and multi-place content require text, the original video or timestamped screenshots.",
+      "canSupport": ["original_url_submitted", "oembed_title_observed", "oembed_author_observed", "oembed_thumbnail_url_observed"]
     }
   },
   "offers": {
@@ -177,8 +205,8 @@
     }
   },
   "copy": {
-    "onboardingZh": "Kornvia 想去就出发已准备好。把本轮旅行截图、公开链接、视频或文字发给我，我会先收进按目的地整理的想去库，不会擅自生成攻略。小红书完整笔记链接、携程地点链接和公开公众号文章会按平台规则读取；马蜂窝遇安全检测时会保留原链接，并请你补截图、保存网页或文字。多地点文章不会冒充一个地点，需要指定地点名或拆分收纳。需要整理时，说“生成曼谷想去护照”。免费档包含收纳、分库、地点卡与配图、护照、基础片区分组、修改和本地导出。¥199 人工逐日行程内测覆盖一个城市、3–7 天、2–15 个地点，含一次范围内修改和一次双方约定日期的出发前复核；不代订、不持续监控。内测期限量接单，提交后确认档期。",
-    "onboardingEn": "Kornvia Want to Go is ready. Send travel screenshots, public links, videos or text from this turn and I will save them by destination in your want-to-go library without creating a guide unless asked. Full Xiaohongshu note URLs, Ctrip place URLs and public WeChat Official Account articles use verified platform adapters. If Mafengwo presents a security check, the submitted URL is retained and a screenshot, saved page or pasted text is requested. Multi-place articles are not presented as one place; name the target place or split the source. The free tier includes capture, destination libraries, place cards and images, passport, basic area grouping, edits and local export. The ¥199 manual itinerary beta covers one city, 3–7 days and 2–15 places with one in-scope revision and one pre-trip review on an agreed date. It does not include booking or continuous monitoring. Beta availability is limited and confirmed after submission.",
+    "onboardingZh": "Kornvia 想去就出发已准备好。把本轮旅行截图、公开链接、视频或文字发给我，我会先收进按目的地整理的想去库，不会擅自生成攻略。小红书完整笔记链接、携程地点链接和公开公众号文章会按平台规则读取；马蜂窝遇安全检测时会保留原链接，并请你补截图、保存网页或文字。抖音会读取本轮公开作品页；TikTok 和 YouTube 读取公开视频的公开嵌入元数据；Instagram 支持公开帖子与 Reel，Story 不支持。这四个平台读取受限或资料不足时都会保留原链接，并请你补原视频、截图或文字。多地点文章不会冒充一个地点，需要指定地点名或拆分收纳。需要整理时，说“生成曼谷想去护照”。免费档包含收纳、分库、地点卡与配图、护照、基础片区分组、修改和本地导出。¥199 人工逐日行程内测覆盖一个城市、3–7 天、2–15 个地点，含一次范围内修改和一次双方约定日期的出发前复核；不代订、不持续监控。内测期限量接单，提交后确认档期。",
+    "onboardingEn": "Kornvia Want to Go is ready. Send travel screenshots, public links, videos or text from this turn and I will save them by destination in your want-to-go library without creating a guide unless asked. Full Xiaohongshu note URLs, Ctrip place URLs and public WeChat Official Account articles use verified platform adapters. If Mafengwo presents a security check, the submitted URL is retained and a screenshot, saved page or pasted text is requested. Douyin reads only public video-page metadata available in the current run. TikTok and YouTube use public embed metadata for public videos. Instagram supports public posts and Reels; Stories are unsupported. If any of these four platforms is blocked or returns incomplete evidence, the original URL is retained and the original video, screenshots or text is requested. Multi-place articles are not presented as one place; name the target place or split the source. The free tier includes capture, destination libraries, place cards and images, passport, basic area grouping, edits and local export. The ¥199 manual itinerary beta covers one city, 3–7 days and 2–15 places with one in-scope revision and one pre-trip review on an agreed date. It does not include booking or continuous monitoring. Beta availability is limited and confirmed after submission.",
     "savedNextStepZh": "想把收藏整理成网页攻略，可以说“生成{destination}想去护照”。",
     "savedNextStepEn": "Say “Create my {destination} Want-to-go passport” when you want a shareable web guide.",
     "passportReadyZh": "想去护照已生成。免费档可继续修改、排序、撤销和本地导出。需要人工逐日安排时，¥199 内测覆盖一个城市、3–7 天、2–15 个地点，含一次范围内修改和一次双方约定日期的出发前复核；不代订、不持续监控。内测期限量接单，提交后确认档期。",

@@ -22,9 +22,9 @@ import uuid
 import zipfile
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterator, Optional, Union
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "product.json"
 CONTRACT_PATH = Path(__file__).resolve().parent.parent / "references" / "shared-data-contract-v2.schema.json"
@@ -172,7 +172,9 @@ EDITABLE_PLACE_FIELDS = {
     "departureReminder", "departureTip", "routeStart", "routeEnd", "waypoints",
     "suggestedDuration", "durationText", "destination", "displayMediaId",
 }
-CONFIRM_EVIDENCE_FIELDS = {"candidateSource", "providerPlaceId", "sourceUrl"}
+CONFIRM_EVIDENCE_FIELDS = {
+    "candidateSource", "providerPlaceId", "sourceUrl", "confirmedBy", "confirmationQuote",
+}
 UNDOABLE_EVENT_TYPES = {"place.update", "place.delete", "place.restore", "place.reorder"}
 SECRET_PATTERN = re.compile(
     r"(?:-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|"
@@ -182,12 +184,102 @@ SECRET_PATTERN = re.compile(
     re.IGNORECASE,
 )
 CUSTOMER_INTERNAL_PATTERN = re.compile(
-    r"(?:\.workbuddy|\.claude|/Users/|/mnt/|localhost|127\.0\.0\.1|"
+    r"(?:\.workbuddy|\.claude|/Users/|/mnt/|[A-Za-z]:[\\/](?:Users|Documents and Settings)[\\/]|"
+    r"%USERPROFILE%|https?://(?:localhost|127\.0\.0\.1)(?::\d+)?|"
     r"sourceIds?|mediaIds?|confidenceScore|detailLookupAudit|nameSource|hostChecks|"
     r"platformAccess|platformItemId|platformEngagement|failureCode|"
     r"schemaVersion|operationId|tombstones?|promptInjection|宿主诊断)",
     re.IGNORECASE,
 )
+SENSITIVE_QUERY_KEYS = {
+    "xsec_token", "xsec_source", "access_token", "refresh_token", "auth_token",
+    "authorization", "api_key", "apikey", "signature", "sig",
+}
+MAX_SCAN_ENTRY_BYTES = 32 * 1024 * 1024
+MAX_SCAN_TOTAL_BYTES = 128 * 1024 * 1024
+MAX_SCAN_ARCHIVE_ENTRIES = 10_000
+MAX_CUSTOMER_PHOTO_BYTES = 16 * 1024 * 1024
+RELEASE_ROOT = "want-to-go-trip-planner"
+RELEASE_MANIFEST_NAME = f"{RELEASE_ROOT}/release-manifest.json"
+RELEASE_MANIFEST_SCHEMA = "kornvia-skill-release-manifest-1"
+
+CLI_ERROR_MESSAGES = {
+    "zh-CN": {
+        "ARGUMENT_ERROR": "命令参数不完整或格式不正确，请按帮助中的参数重新执行。",
+        "FILE_ERROR": "无法读取或写入指定文件，请检查路径、权限和文件状态。",
+        "JSON_ERROR": "JSON 文件格式不正确，请修正后重试。",
+        "CONTRACT_VALIDATION_FAILED": "数据未通过共享契约校验，请先修正缺失或越界字段。",
+        "PACKAGE_SCAN_FAILED": "发布包或客户输出未通过安全扫描，请查看审计代码并修正后重试。",
+        "PLACE_NOT_FOUND": "没有找到指定地点或目的地，请核对 ID 和所属分库。",
+        "OPERATION_CONFLICT": "操作状态或幂等标识冲突，请刷新当前库后使用新的操作标识重试。",
+        "INVALID_INPUT": "输入内容不符合要求，请核对字段类型、允许值和必填项。",
+        "ERROR": "操作未完成，请检查输入和当前库状态后重试。",
+    },
+    "en-US": {
+        "ARGUMENT_ERROR": "Command arguments are missing or invalid. Check the help text and try again.",
+        "FILE_ERROR": "The requested file could not be read or written. Check its path, permissions and state.",
+        "JSON_ERROR": "The JSON file is invalid. Correct it and try again.",
+        "CONTRACT_VALIDATION_FAILED": "The data failed the shared contract. Correct missing or out-of-range fields first.",
+        "PACKAGE_SCAN_FAILED": "The release package or customer output failed its security scan. Review the audit code and correct it before retrying.",
+        "PLACE_NOT_FOUND": "The requested place or destination was not found. Check its ID and destination library.",
+        "OPERATION_CONFLICT": "The operation state or idempotency identifier conflicts with current data. Reload the library and retry with a new operation ID.",
+        "INVALID_INPUT": "The input is invalid. Check field types, allowed values and required fields.",
+        "ERROR": "The operation did not complete. Check the input and current library state, then try again.",
+    },
+}
+
+
+def normalized_locale(value: Any) -> str:
+    return "en-US" if text(value).lower().startswith("en") else "zh-CN"
+
+
+def cli_error_code(error: BaseException) -> str:
+    message = str(error)
+    prefix = re.match(r"^([A-Z][A-Z0-9_]{2,}):", message)
+    if prefix:
+        return prefix.group(1)
+    lowered = message.casefold()
+    if isinstance(error, json.JSONDecodeError):
+        return "JSON_ERROR"
+    if isinstance(error, OSError):
+        return "FILE_ERROR"
+    if "contract validation failed" in lowered or "schema_" in lowered:
+        return "CONTRACT_VALIDATION_FAILED"
+    if "scan failed" in lowered or "archive" in lowered or "release manifest" in lowered:
+        return "PACKAGE_SCAN_FAILED"
+    if "not found" in lowered or "不存在" in message:
+        return "PLACE_NOT_FOUND"
+    if "operation-id" in lowered or "operation id" in lowered or "collision" in lowered or "undo" in lowered:
+        return "OPERATION_CONFLICT"
+    if any(token in lowered for token in ("must ", "needs ", "required", "invalid", "unsupported", "cannot be empty")):
+        return "INVALID_INPUT"
+    return "ERROR"
+
+
+def localized_cli_error(error: BaseException, locale: Any) -> dict[str, str]:
+    normalized = normalized_locale(locale)
+    code = cli_error_code(error)
+    messages = CLI_ERROR_MESSAGES[normalized]
+    return {"code": code, "message": messages.get(code, messages["ERROR"])}
+
+
+def requested_cli_locale(argv: list[str]) -> str:
+    for index, value in enumerate(argv):
+        if value == "--locale" and index + 1 < len(argv):
+            return normalized_locale(argv[index + 1])
+        if value.startswith("--locale="):
+            return normalized_locale(value.split("=", 1)[1])
+    return "zh-CN"
+
+
+class LocalizedArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        locale = requested_cli_locale(sys.argv[1:])
+        payload = {
+            "code": "ARGUMENT_ERROR",
+            "message": CLI_ERROR_MESSAGES[locale]["ARGUMENT_ERROR"],
+        }
+        self.exit(2, json.dumps(payload, ensure_ascii=False) + "\n")
 
 
 def normalized_name_source(value: Any) -> str:
@@ -219,6 +311,7 @@ def atomic_write_json(path: Union[str, Path], value: Any) -> None:
             os.fsync(handle.fileno())
         os.chmod(temporary, 0o600)
         os.replace(str(temporary), str(target))
+        fsync_directory(target.parent)
     except Exception:
         if temporary.exists():
             temporary.unlink()
@@ -226,6 +319,20 @@ def atomic_write_json(path: Union[str, Path], value: Any) -> None:
 
 
 write_json = atomic_write_json
+
+
+def fsync_directory(path: Union[str, Path]) -> None:
+    """Persist a completed rename where the platform supports directory fsync."""
+    try:
+        descriptor = os.open(str(path), os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(descriptor)
+    except OSError:
+        pass
+    finally:
+        os.close(descriptor)
 
 
 @contextmanager
@@ -344,6 +451,7 @@ def migrate_library_data(raw: dict[str, Any]) -> tuple[dict[str, Any], list[str]
         )
         place.setdefault("sourceIds", [])
         place.setdefault("mediaIds", [])
+        place.setdefault("placeType", normalized_place_type(place))
         place.setdefault("sortOrder", index)
         place.setdefault("createdAt", now_iso())
         place.setdefault("updatedAt", place["createdAt"])
@@ -352,9 +460,10 @@ def migrate_library_data(raw: dict[str, Any]) -> tuple[dict[str, Any], list[str]
         legacy_audits = place.get("detailLookupAudit")
         if isinstance(legacy_audits, list):
             normalized_audits = [
-                normalized
+                normalized or legacy_fact_audit(item)
                 for item in legacy_audits
                 if (normalized := normalize_fact_audit(item))
+                or legacy_fact_audit(item)
             ]
             if normalized_audits != legacy_audits:
                 place["detailLookupAudit"] = normalized_audits
@@ -380,6 +489,7 @@ def migrate_library_data(raw: dict[str, Any]) -> tuple[dict[str, Any], list[str]
             snapshot["legacyImported"] = True
             changes.append(f"legacy_verification_snapshot:{text(snapshot.get('id')) or 'unknown'}")
         snapshot.setdefault("tripRisks", [])
+        snapshot.setdefault("changes", [])
         normalized_trip_risks = [
             normalized
             for item in snapshot.get("tripRisks") or []
@@ -394,9 +504,10 @@ def migrate_library_data(raw: dict[str, Any]) -> tuple[dict[str, Any], list[str]
             checked_default = text(snapshot.get("checkedAt"))
             supplied_audits = item.get("factAudits") or item.get("detailLookupAudit") or []
             normalized_audits = [
-                normalized
+                normalized or legacy_fact_audit(audit, checked_default)
                 for audit in supplied_audits
                 if (normalized := normalize_fact_audit(audit, checked_default))
+                or legacy_fact_audit(audit, checked_default)
             ]
             if not normalized_audits and isinstance(item.get("facts"), dict):
                 normalized_audits = [
@@ -411,6 +522,10 @@ def migrate_library_data(raw: dict[str, Any]) -> tuple[dict[str, Any], list[str]
                 ]
             item["factAudits"] = normalized_audits
             item.pop("detailLookupAudit", None)
+            item.setdefault("accessLevel", "submitted")
+            item.setdefault("canSupport", [])
+            item.setdefault("cannotProve", ["legacy_review_evidence_incomplete"])
+            item.setdefault("facts", {})
             item["executionRisks"] = [
                 normalized
                 for risk in item.get("executionRisks") or []
@@ -421,7 +536,14 @@ def migrate_library_data(raw: dict[str, Any]) -> tuple[dict[str, Any], list[str]
     for request in data["tripRequests"]:
         if not isinstance(request, dict):
             continue
+        request.setdefault("id", f"trip-request-{uuid.uuid4().hex[:12]}")
+        request.setdefault("offerId", PUBLIC_OFFER_ID)
+        request.setdefault("destinationKey", destination_key(request.get("destination")))
+        request.setdefault("status", "draft")
+        request.setdefault("createdAt", now_iso())
         request.setdefault("updatedAt", text(request.get("createdAt")) or now_iso())
+        if old_version != CONTRACT_VERSION:
+            request.setdefault("legacyImported", True)
         if text(request.get("offerId")) == "pre-trip-review" and request.get("legacyImported") is not True:
             request["legacyImported"] = True
             changes.append(f"legacy_trip_request_offer:{text(request.get('id')) or 'unknown'}")
@@ -457,7 +579,24 @@ def migrate_library_data(raw: dict[str, Any]) -> tuple[dict[str, Any], list[str]
                 request["legacyImported"] = True
                 if not was_legacy:
                     changes.append(f"legacy_trip_request_stage:{text(request.get('id')) or 'unknown'}")
+    source_ids_by_bundle: dict[str, dict[str, str]] = {}
+    for bundle, _raw, base_id, canonical_id in canonical_source_records(data.get("bundles") or []):
+        source_ids_by_bundle.setdefault(text(bundle.get("bundleId")), {})[base_id] = canonical_id
     rebuild_source_ledger(data)
+    active_source_ids = {text(item.get("id")) for item in data.get("sources") or []}
+    for place in data.get("places") or []:
+        if not isinstance(place, dict):
+            continue
+        bundle_ids = merge_unique([*(place.get("bundleIds") or []), place.get("bundleId")])
+        remapped: list[str] = []
+        for source_id in merge_unique(place.get("sourceIds") or []):
+            candidates = [
+                source_ids_by_bundle[bundle_id][source_id]
+                for bundle_id in bundle_ids
+                if source_id in source_ids_by_bundle.get(bundle_id, {})
+            ]
+            remapped.extend(candidates or ([source_id] if source_id in active_source_ids else [source_id]))
+        place["sourceIds"] = merge_unique(remapped)
     rebuild_media_ledger(data)
     rebuild_destinations(data)
     return data, changes
@@ -683,6 +822,33 @@ def source_links(place: dict[str, Any]) -> list[dict[str, str]]:
     return result
 
 
+def customer_safe_url(value: Any) -> str:
+    """Keep a submitted public URL while removing credential-like query fields."""
+    raw = text(value)
+    try:
+        parsed = urlsplit(raw)
+    except ValueError:
+        return ""
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+        return ""
+    query = [
+        (key, item)
+        for key, item in parse_qsl(parsed.query, keep_blank_values=True)
+        if key.casefold() not in SENSITIVE_QUERY_KEYS
+    ]
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query, doseq=True), parsed.fragment))
+
+
+def customer_source_links(value: Any) -> list[dict[str, str]]:
+    links = source_links({"originalSourceLinks": value if isinstance(value, list) else []})
+    result: list[dict[str, str]] = []
+    for item in links:
+        safe_url = customer_safe_url(item.get("url"))
+        if safe_url:
+            result.append({**item, "url": safe_url})
+    return result
+
+
 def audit_sources(raw: Any, checked_urls: Any = None) -> list[dict[str, str]]:
     candidates = raw if isinstance(raw, list) else []
     if not candidates and isinstance(checked_urls, list):
@@ -742,6 +908,30 @@ def normalize_fact_audit(raw: Any, checked_at_default: str = "", strict: bool = 
         result["checkedAt"] = checked_at
     if valid_until:
         result["validUntil"] = valid_until
+    return result
+
+
+def legacy_fact_audit(raw: Any, checked_at_default: str = "") -> dict[str, Any]:
+    """Losslessly downgrade a recognizable legacy audit instead of deleting it."""
+    if not isinstance(raw, dict) or not text(raw.get("field")):
+        return {}
+    legacy_status = text(raw.get("status")) or "missing"
+    cannot_prove = merge_unique([
+        *(raw.get("cannotProve") or []),
+        f"legacy_audit_status:{legacy_status}",
+    ])
+    result: dict[str, Any] = {
+        "field": text(raw.get("field")),
+        "status": "unverified",
+        "sources": audit_sources(raw.get("sources"), raw.get("checkedUrls")),
+        "cannotProve": cannot_prove,
+        "nextAction": text(raw.get("nextAction")) or "Recheck this legacy fact against a current public source.",
+    }
+    checked_at = text(raw.get("checkedAt")) or checked_at_default
+    if checked_at:
+        result["checkedAt"] = checked_at
+    if text(raw.get("validUntil")):
+        result["validUntil"] = text(raw.get("validUntil"))
     return result
 
 
@@ -958,6 +1148,57 @@ def customer_photo(
     return normalized_photo({"path": path_value})
 
 
+def verified_image_bytes(path_value: Any) -> tuple[bytes, str]:
+    path = Path(text(path_value))
+    if not path.is_file() or path.is_symlink() or path.stat().st_size > MAX_CUSTOMER_PHOTO_BYTES:
+        return b"", ""
+    data = path.read_bytes()
+    suffix = path.suffix.lower()
+    valid = (
+        suffix == ".png" and data.startswith(b"\x89PNG\r\n\x1a\n")
+        or suffix in {".jpg", ".jpeg"} and data.startswith(b"\xff\xd8") and data.endswith(b"\xff\xd9")
+        or suffix == ".webp" and len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP"
+    )
+    return (data, suffix) if valid else (b"", "")
+
+
+def stage_customer_photos(places: list[dict[str, Any]], output_path: Union[str, Path]) -> None:
+    """Copy verified display images beside the passport so the renderer stays sandboxed."""
+    output = Path(output_path).resolve()
+    asset_root = output.parent / f"{output.stem}-assets"
+    for place in places:
+        photo = place.get("photo")
+        if not isinstance(photo, dict) or not text(photo.get("path")):
+            continue
+        data, suffix = verified_image_bytes(photo.get("path"))
+        if not data:
+            place.pop("photo", None)
+            continue
+        asset_root.mkdir(parents=True, exist_ok=True)
+        digest = hashlib.sha256(data).hexdigest()
+        target = asset_root / f"{digest[:24]}{suffix}"
+        if not target.exists():
+            descriptor, temporary_name = tempfile.mkstemp(
+                prefix=f".{target.name}.", suffix=".tmp", dir=str(asset_root)
+            )
+            temporary = Path(temporary_name)
+            try:
+                with os.fdopen(descriptor, "wb") as handle:
+                    handle.write(data)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.chmod(temporary, 0o600)
+                os.replace(temporary, target)
+                fsync_directory(asset_root)
+            except Exception:
+                if temporary.exists():
+                    temporary.unlink()
+                raise
+        elif hashlib.sha256(target.read_bytes()).hexdigest() != digest:
+            raise ValueError("passport asset hash collision")
+        photo["path"] = os.path.relpath(target, output.parent)
+
+
 def customer_place(
     place: dict[str, Any],
     locale: str,
@@ -988,9 +1229,7 @@ def customer_place(
         "waypoints": place.get("waypoints") if isinstance(place.get("waypoints"), list) else [],
         "suggestedDuration": first(place, "suggestedDuration", "durationText"),
         "photo": customer_photo(place, media_by_id),
-        "originalSourceLinks": source_links({
-            "originalSourceLinks": place.get("originalSourceLinks") or [],
-        }),
+        "originalSourceLinks": customer_source_links(place.get("originalSourceLinks") or []),
         "verificationSummary": customer_verification_summary(place, locale),
         "executionRisks": customer_execution_risks(place.get("executionRisks"), locale),
     }
@@ -1022,13 +1261,21 @@ def bundle_failures(bundle: dict[str, Any]) -> list[dict[str, Any]]:
 
 def bundle_sources(bundle: dict[str, Any]) -> list[dict[str, Any]]:
     """Return customer-provided sources, including links whose public fetch failed."""
-    return bundle_evidence(bundle) + bundle_failures(bundle)
+    current_sources = bundle_evidence(bundle) + bundle_failures(bundle)
+    if current_sources:
+        return current_sources
+    legacy = bundle.get("sources")
+    return legacy if isinstance(legacy, list) else []
 
 
 UNTRUSTED_INSTRUCTION_PATTERN = re.compile(
     r"(?:ignore\s+(?:all\s+)?(?:previous|prior|above)\s+instructions?|"
+    r"disregard\s+(?:all\s+)?(?:previous|prior|earlier)\s+(?:instructions?|guidance)|"
+    r"override\s+(?:the\s+)?(?:system|developer|previous)\s+(?:prompt|message|instructions?)|"
+    r"(?:new\s+task|act\s+as|developer\s+mode)\s*[:：]?|"
     r"system\s+prompt|developer\s+message|reveal\s+(?:the\s+)?prompt|"
     r"忽略(?:之前|以上|前面)(?:所有)?(?:指令|要求)|系统提示词|开发者消息|"
+    r"(?:新任务|请执行|开发者模式)\s*[:：]?|"
     r"按以下(?:指令|要求)执行|不要遵守(?:之前|系统)(?:指令|要求))",
     re.IGNORECASE,
 )
@@ -1399,7 +1646,7 @@ def command_ingest(args: argparse.Namespace) -> None:
     ).hexdigest()[:12]
     operation_id = get_operation_id(args, f"ingest:{bundle_id}:{digest}")
     with library_transaction(args.library) as library:
-        if find_event_by_operation(library, operation_id):
+        if find_event_by_operation(library, operation_id, "source.ingest", bundle_id):
             print(json.dumps({"status": "already_applied", "bundleId": bundle_id}, ensure_ascii=False))
             return
         library["bundles"] = [item for item in library["bundles"] if item.get("bundleId") != bundle_id]
@@ -1459,11 +1706,11 @@ def command_present(args: argparse.Namespace) -> None:
     if args.locale.startswith("en"):
         failed_note = f"{failures} source(s) could not be read yet, but the originals are preserved. " if failures else ""
         next_step = PRODUCT_CONFIG["copy"]["savedNextStepEn"].replace("{destination}", destination)
-        message = f"Saved {received} item(s) to your {destination} want-to-go library. {failed_note}No passport was generated. {next_step}"
+        message = f"Your {destination} want-to-go library now contains {received} item(s). {failed_note}No passport was generated. {next_step}"
     else:
         failed_note = f"其中{failures}项暂时没有读到内容，原始来源仍已保留。" if failures else ""
         next_step = PRODUCT_CONFIG["copy"]["savedNextStepZh"].replace("{destination}", destination)
-        message = f"已收进你的{destination}想去库：{received}项。{failed_note}这次只做收纳，没有生成护照。{next_step}"
+        message = f"你的{destination}想去库现有{received}项。{failed_note}这次只做收纳，没有生成护照。{next_step}"
     print(message)
 
 
@@ -1475,7 +1722,7 @@ def command_destination_alias(args: argparse.Namespace) -> None:
         args, f"destination-alias:{normalized_token(args.destination)}:{normalized_token(alias)}",
     )
     with library_transaction(args.library) as library:
-        if find_event_by_operation(library, operation_id):
+        if find_event_by_operation(library, operation_id, "destination.alias"):
             print(json.dumps({"status": "already_applied"}, ensure_ascii=False))
             return
         canonical_key = destination_key_for_library(library, args.destination)
@@ -1663,14 +1910,27 @@ def get_operation_id(args: argparse.Namespace, fallback: str) -> str:
     return text(getattr(args, "operation_id", "")) or fallback
 
 
-def find_event_by_operation(library: dict[str, Any], operation_id: str) -> Optional[dict[str, Any]]:
-    return next(
+def find_event_by_operation(
+    library: dict[str, Any],
+    operation_id: str,
+    expected_type: str = "",
+    entity_id: str = "",
+) -> Optional[dict[str, Any]]:
+    event = next(
         (
             event for event in library.get("events") or []
             if isinstance(event, dict) and text(event.get("operationId")) == operation_id
         ),
         None,
     )
+    if event and (
+        (expected_type and text(event.get("type")) != expected_type)
+        or (entity_id and text(event.get("entityId")) != entity_id)
+    ):
+        raise ValueError(
+            "operation-id collision: the ID is already used by another command or entity"
+        )
+    return event
 
 
 def append_event(
@@ -1682,7 +1942,7 @@ def append_event(
     after: Any = None,
     undoable: bool = False,
 ) -> dict[str, Any]:
-    existing = find_event_by_operation(library, operation_id)
+    existing = find_event_by_operation(library, operation_id, event_type, entity_id)
     if existing:
         return existing
     event = {
@@ -1760,7 +2020,7 @@ def command_promote(args: argparse.Namespace) -> None:
     operation_id = get_operation_id(args, f"promote:{args.bundle_id}:{digest}")
     promoted: list[str] = []
     with library_transaction(args.library) as library:
-        existing_event = find_event_by_operation(library, operation_id)
+        existing_event = find_event_by_operation(library, operation_id, "place.promote", args.bundle_id)
         if existing_event:
             prior = existing_event.get("after") if isinstance(existing_event.get("after"), dict) else {}
             print(json.dumps({"status": "already_applied", "placeIds": prior.get("placeIds", [])}, ensure_ascii=False))
@@ -1946,6 +2206,7 @@ def command_passport(args: argparse.Namespace) -> None:
                 "url": CTA_URL,
             },
         }
+        stage_customer_photos(payload["places"], args.output)
         write_json(args.output, payload)
         for bundle in library["bundles"]:
             if requested_key in bundle_destination_keys(bundle):
@@ -2008,7 +2269,7 @@ def command_edit(args: argparse.Namespace) -> None:
     patch = read_patch(args.patch)
     operation_id = get_operation_id(args, f"edit:{args.place_id}:{uuid.uuid4().hex[:12]}")
     with library_transaction(args.library) as library:
-        existing_event = find_event_by_operation(library, operation_id)
+        existing_event = find_event_by_operation(library, operation_id, "place.update", args.place_id)
         if existing_event:
             print(json.dumps({"status": "already_applied", "placeId": args.place_id}, ensure_ascii=False))
             return
@@ -2035,7 +2296,7 @@ def command_edit(args: argparse.Namespace) -> None:
 def command_delete(args: argparse.Namespace) -> None:
     operation_id = get_operation_id(args, f"delete:{args.place_id}:{uuid.uuid4().hex[:12]}")
     with library_transaction(args.library) as library:
-        if find_event_by_operation(library, operation_id):
+        if find_event_by_operation(library, operation_id, "place.delete", args.place_id):
             print(json.dumps({"status": "already_applied", "placeId": args.place_id}, ensure_ascii=False))
             return
         place = next((item for item in library["places"] if text(item.get("id")) == args.place_id), None)
@@ -2060,7 +2321,7 @@ def command_delete(args: argparse.Namespace) -> None:
 def command_restore(args: argparse.Namespace) -> None:
     operation_id = get_operation_id(args, f"restore:{args.place_id}:{uuid.uuid4().hex[:12]}")
     with library_transaction(args.library) as library:
-        if find_event_by_operation(library, operation_id):
+        if find_event_by_operation(library, operation_id, "place.restore", args.place_id):
             print(json.dumps({"status": "already_applied", "placeId": args.place_id}, ensure_ascii=False))
             return
         if any(text(item.get("id")) == args.place_id for item in library["places"]):
@@ -2093,7 +2354,7 @@ def command_reorder(args: argparse.Namespace) -> None:
     with library_transaction(args.library) as library:
         requested_key = destination_key_for_library(library, args.destination)
         operation_id = get_operation_id(args, f"reorder:{requested_key}:{uuid.uuid4().hex[:12]}")
-        if find_event_by_operation(library, operation_id):
+        if find_event_by_operation(library, operation_id, "place.reorder", requested_key):
             print(json.dumps({"status": "already_applied", "destinationKey": requested_key}, ensure_ascii=False))
             return
         matching = [
@@ -2114,9 +2375,11 @@ def command_reorder(args: argparse.Namespace) -> None:
 
 
 def command_undo(args: argparse.Namespace) -> None:
-    operation_id = get_operation_id(args, f"undo:{uuid.uuid4().hex[:12]}")
+    operation_id = text(getattr(args, "operation_id", ""))
+    if not operation_id:
+        raise ValueError("operation-id is required for undo so retries cannot undo another event")
     with library_transaction(args.library) as library:
-        if find_event_by_operation(library, operation_id):
+        if find_event_by_operation(library, operation_id, "event.undo"):
             print(json.dumps({"status": "already_applied"}, ensure_ascii=False))
             return
         requested_event = text(getattr(args, "event_id", ""))
@@ -2179,7 +2442,7 @@ def command_undo(args: argparse.Namespace) -> None:
     print(json.dumps({"status": "undone", "eventId": event.get("id"), "eventType": event_type}, ensure_ascii=False))
 
 
-def command_migrate(args: argparse.Namespace) -> None:
+def command_migrate(args: argparse.Namespace) -> int:
     target = Path(args.library)
     raw = read_json(target) if target.exists() and target.stat().st_size else empty_library()
     if not isinstance(raw, dict):
@@ -2192,6 +2455,12 @@ def command_migrate(args: argparse.Namespace) -> None:
         "changes": changes,
         "dryRun": bool(args.dry_run),
     }
+    validation_issues = validate_library_contract(migrated)
+    report["validationIssues"] = validation_issues
+    if validation_issues:
+        report["status"] = "blocked"
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 1
     if not args.dry_run:
         output = Path(args.output) if text(args.output) else target
         append_event(
@@ -2207,6 +2476,7 @@ def command_migrate(args: argparse.Namespace) -> None:
             atomic_write_json(output, migrated)
         report["output"] = str(output)
     print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0
 
 
 def repair_library(library: dict[str, Any]) -> tuple[list[str], list[str]]:
@@ -2263,17 +2533,10 @@ def repair_library(library: dict[str, Any]) -> tuple[list[str], list[str]]:
     if before_destinations != json.dumps(library.get("destinations") or [], ensure_ascii=False, sort_keys=True):
         fixes.append("rebuilt_destination_index")
     source_ids = {text(item.get("id")) for item in library.get("sources") or []}
-    dangling_removed = False
     for place in library.get("places") or []:
-        current = merge_unique(place.get("sourceIds") or [])
-        repaired = [item for item in current if item in source_ids]
-        if repaired != current:
-            place["sourceIds"] = repaired
-            dangling_removed = True
-    if dangling_removed:
-        rebuild_media_ledger(library)
-        rebuild_destinations(library)
-        fixes.append("removed_dangling_place_sources")
+        for source_id in merge_unique(place.get("sourceIds") or []):
+            if source_id not in source_ids:
+                blockers.append(f"dangling_place_source:{text(place.get('id'))}:{source_id}")
     return fixes, blockers
 
 
@@ -2365,7 +2628,13 @@ def json_schema_issues(
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         if schema.get("minimum") is not None and value < schema["minimum"]:
             issues.append(f"schema_minimum:{path}")
+        if schema.get("maximum") is not None and value > schema["maximum"]:
+            issues.append(f"schema_maximum:{path}")
     if isinstance(value, list):
+        if schema.get("minItems") is not None and len(value) < int(schema["minItems"]):
+            issues.append(f"schema_min_items:{path}")
+        if schema.get("maxItems") is not None and len(value) > int(schema["maxItems"]):
+            issues.append(f"schema_max_items:{path}")
         if schema.get("uniqueItems") is True:
             encoded = [json.dumps(item, ensure_ascii=False, sort_keys=True) for item in value]
             if len(encoded) != len(set(encoded)):
@@ -2700,7 +2969,7 @@ def command_trip_request(args: argparse.Namespace) -> None:
         entity["placeIds"] = place_ids
     operation_id = get_operation_id(args, f"trip-request:{entity['id']}")
     with library_transaction(args.library) as library:
-        if find_event_by_operation(library, operation_id):
+        if find_event_by_operation(library, operation_id, "trip_request.save", entity["id"]):
             print(json.dumps({"status": "already_applied", "tripRequestId": entity["id"]}, ensure_ascii=False))
             return
         if place_ids:
@@ -2743,14 +3012,120 @@ def iter_text_payloads(path: Path) -> Iterator[tuple[str, str]]:
     if path.is_dir():
         for item in sorted(path.rglob("*")):
             if item.is_file() and not item.is_symlink() and item.suffix.lower() in allowed:
+                if item.stat().st_size > MAX_SCAN_ENTRY_BYTES:
+                    raise ValueError(f"scan entry too large: {item}")
                 yield str(item), item.read_text(encoding="utf-8", errors="replace")
     elif path.suffix.lower() == ".zip":
         with zipfile.ZipFile(path) as archive:
-            for name in sorted(archive.namelist()):
-                if Path(name).suffix.lower() in allowed:
-                    yield name, archive.read(name).decode("utf-8", errors="replace")
+            infos = archive.infolist()
+            if len(infos) > MAX_SCAN_ARCHIVE_ENTRIES:
+                raise ValueError("archive contains too many entries")
+            total = 0
+            for info in sorted(infos, key=lambda item: item.filename):
+                name = info.filename.replace("\\", "/")
+                if unsafe_archive_name(name):
+                    raise ValueError(f"unsafe_archive_entry:{name}")
+                if info.is_dir():
+                    continue
+                if info.flag_bits & 0x1:
+                    raise ValueError(f"encrypted_archive_entry:{name}")
+                if (info.external_attr >> 16) & 0o170000 == 0o120000:
+                    raise ValueError(f"symlink_archive_entry:{name}")
+                if info.file_size > MAX_SCAN_ENTRY_BYTES:
+                    raise ValueError(f"scan entry too large: {name}")
+                total += info.file_size
+                if total > MAX_SCAN_TOTAL_BYTES:
+                    raise ValueError("archive expanded content is too large")
+                if PurePosixPath(name).suffix.lower() in allowed:
+                    yield name, archive.read(info).decode("utf-8", errors="replace")
     elif path.suffix.lower() in allowed:
+        if path.stat().st_size > MAX_SCAN_ENTRY_BYTES:
+            raise ValueError(f"scan entry too large: {path}")
         yield str(path), path.read_text(encoding="utf-8", errors="replace")
+
+
+def unsafe_archive_name(name: str) -> bool:
+    normalized = name.replace("\\", "/")
+    parts = PurePosixPath(normalized).parts
+    return (
+        not normalized
+        or normalized.startswith("/")
+        or bool(re.match(r"^[A-Za-z]:/", normalized))
+        or ".." in parts
+        or "\x00" in normalized
+    )
+
+
+def forbidden_package_name(name: str) -> bool:
+    normalized = name.replace("\\", "/").rstrip("/")
+    base = PurePosixPath(normalized).name.casefold()
+    if base in {".ds_store", "__pycache__", ".env", "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"}:
+        return True
+    if base.startswith(".env."):
+        return True
+    return bool(re.search(r"\.(?:tmp|temp|lock|pem|key|p12|pfx)$", base, re.I))
+
+
+def release_manifest_issues(archive: zipfile.ZipFile) -> list[dict[str, str]]:
+    issues: list[dict[str, str]] = []
+    names = [info.filename.replace("\\", "/") for info in archive.infolist()]
+    if len(names) != len(set(names)):
+        issues.append({"file": str(archive.filename), "type": "duplicate_archive_entry"})
+    roots = {PurePosixPath(name).parts[0] for name in names if PurePosixPath(name).parts}
+    if roots != {RELEASE_ROOT}:
+        issues.append({"file": str(archive.filename), "type": "unexpected_release_root"})
+    if RELEASE_MANIFEST_NAME not in names:
+        issues.append({"file": RELEASE_MANIFEST_NAME, "type": "missing_release_manifest"})
+        return issues
+    try:
+        manifest = json.loads(archive.read(RELEASE_MANIFEST_NAME))
+    except (KeyError, UnicodeDecodeError, json.JSONDecodeError):
+        issues.append({"file": RELEASE_MANIFEST_NAME, "type": "invalid_release_manifest"})
+        return issues
+    if not isinstance(manifest, dict):
+        issues.append({"file": RELEASE_MANIFEST_NAME, "type": "invalid_release_manifest"})
+        return issues
+    expected_markers = {
+        "schemaVersion": RELEASE_MANIFEST_SCHEMA,
+        "packageName": RELEASE_ROOT,
+        "packageVersion": VERSION,
+        "contractVersion": CONTRACT_VERSION,
+        "rootDirectory": RELEASE_ROOT,
+    }
+    for field, expected in expected_markers.items():
+        if manifest.get(field) != expected:
+            issues.append({"file": RELEASE_MANIFEST_NAME, "type": f"release_manifest_{field}_mismatch"})
+    listed = manifest.get("files")
+    if not isinstance(listed, list) or manifest.get("fileCount") != len(listed):
+        issues.append({"file": RELEASE_MANIFEST_NAME, "type": "release_manifest_file_count_mismatch"})
+        return issues
+    expected_files = {
+        name.removeprefix(f"{RELEASE_ROOT}/")
+        for name in names
+        if not name.endswith("/") and name != RELEASE_MANIFEST_NAME
+    }
+    listed_files: dict[str, dict[str, Any]] = {}
+    for item in listed:
+        if not isinstance(item, dict) or not text(item.get("path")):
+            issues.append({"file": RELEASE_MANIFEST_NAME, "type": "invalid_release_manifest_file"})
+            continue
+        path = text(item["path"])
+        if unsafe_archive_name(path) or path in listed_files:
+            issues.append({"file": path, "type": "invalid_release_manifest_path"})
+            continue
+        listed_files[path] = item
+    if set(listed_files) != expected_files:
+        issues.append({"file": RELEASE_MANIFEST_NAME, "type": "release_manifest_file_set_mismatch"})
+    for path, item in listed_files.items():
+        archive_name = f"{RELEASE_ROOT}/{path}"
+        if archive_name not in names:
+            continue
+        data = archive.read(archive_name)
+        if item.get("size") != len(data):
+            issues.append({"file": path, "type": "release_manifest_size_mismatch"})
+        if text(item.get("sha256")) != hashlib.sha256(data).hexdigest():
+            issues.append({"file": path, "type": "release_manifest_hash_mismatch"})
+    return issues
 
 
 def customer_url_issues(content: str) -> list[str]:
@@ -2773,6 +3148,8 @@ def customer_url_issues(content: str) -> list[str]:
             address = None
         if address and not address.is_global:
             issues.append("unsafe_url_host")
+        if any(key.casefold() in SENSITIVE_QUERY_KEYS for key, _item in parse_qsl(parsed.query, keep_blank_values=True)):
+            issues.append("sensitive_url_query")
     return sorted(set(issues))
 
 
@@ -2796,17 +3173,25 @@ def command_scan(args: argparse.Namespace) -> None:
     if not target.exists():
         raise ValueError("scan path does not exist")
     issues: list[dict[str, str]] = []
-    bad_name_pattern = re.compile(r"(?:^|/)(?:\.DS_Store|__pycache__|[^/]+\.(?:tmp|temp|lock))$")
     if target.is_dir():
         for item in target.rglob("*"):
             relative = item.relative_to(target).as_posix()
-            if bad_name_pattern.search(relative):
+            if item.is_symlink():
+                issues.append({"file": relative, "type": "forbidden_symlink"})
+            if forbidden_package_name(relative):
                 issues.append({"file": relative, "type": "forbidden_artifact"})
     elif target.suffix.lower() == ".zip":
         with zipfile.ZipFile(target) as archive:
-            for name in archive.namelist():
-                if bad_name_pattern.search(name):
+            for info in archive.infolist():
+                name = info.filename.replace("\\", "/")
+                if unsafe_archive_name(name):
+                    issues.append({"file": name, "type": "unsafe_archive_entry"})
+                if (info.external_attr >> 16) & 0o170000 == 0o120000:
+                    issues.append({"file": name, "type": "forbidden_symlink"})
+                if forbidden_package_name(name):
                     issues.append({"file": name, "type": "forbidden_artifact"})
+            if args.mode == "package":
+                issues.extend(release_manifest_issues(archive))
     for name, content in iter_text_payloads(target):
         secret_scan_content = re.sub(
             r"data:image/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+",
@@ -2846,6 +3231,14 @@ def command_confirm(args: argparse.Namespace) -> None:
     source_url = text(candidate.get("sourceUrl"))
     candidate_source = text(candidate.get("candidateSource"))
     provider_place_id = text(candidate.get("providerPlaceId"))
+    confirmed_by = text(candidate.get("confirmedBy"))
+    confirmation_quote = text(candidate.get("confirmationQuote"))
+    if candidate_source == "user_confirmation" and (
+        confirmed_by != "user" or not confirmation_quote
+    ):
+        raise ValueError(
+            "user_confirmation requires confirmedBy=user and a confirmationQuote from the current user turn"
+        )
     has_evidence = bool(
         provider_place_id
         or re.match(r"^https?://", source_url, re.I)
@@ -2867,7 +3260,7 @@ def command_confirm(args: argparse.Namespace) -> None:
             raise ValueError(f"{field} must be text")
     operation_id = get_operation_id(args, f"confirm:{args.place_id}:{uuid.uuid4().hex[:12]}")
     with library_transaction(args.library) as library:
-        if find_event_by_operation(library, operation_id):
+        if find_event_by_operation(library, operation_id, "place.update", args.place_id):
             print(json.dumps({"status": "already_applied", "placeId": args.place_id}, ensure_ascii=False))
             return
         place = next((item for item in library["places"] if text(item.get("id")) == args.place_id), None)
@@ -2893,6 +3286,8 @@ def command_confirm(args: argparse.Namespace) -> None:
                 **({"candidateSource": candidate_source} if candidate_source else {}),
                 **({"providerPlaceId": provider_place_id} if provider_place_id else {}),
                 **({"sourceUrl": source_url} if source_url else {}),
+                **({"confirmedBy": confirmed_by} if confirmed_by else {}),
+                **({"confirmationQuote": confirmation_quote[:240]} if confirmation_quote else {}),
             },
         }
     print(json.dumps({"status": "confirmed", "placeId": args.place_id}, ensure_ascii=False))
@@ -2931,9 +3326,9 @@ def command_resolve(args: argparse.Namespace) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="want_to_go.py")
+    parser = LocalizedArgumentParser(prog="want_to_go.py")
     parser.add_argument("--version", action="version", version=VERSION)
-    sub = parser.add_subparsers(dest="command", required=True)
+    sub = parser.add_subparsers(dest="command", required=True, parser_class=LocalizedArgumentParser)
 
     ingest = sub.add_parser("ingest")
     ingest.add_argument("--library", required=True)
@@ -2949,7 +3344,7 @@ def build_parser() -> argparse.ArgumentParser:
     present = sub.add_parser("present")
     present.add_argument("--library", required=True)
     present.add_argument("--destination", required=True)
-    present.add_argument("--locale", default="zh-CN")
+    present.add_argument("--locale", choices=("zh-CN", "en-US", "en"), default="zh-CN")
     present.set_defaults(func=command_present)
 
     destination_alias = sub.add_parser("destination-alias")
@@ -2970,7 +3365,7 @@ def build_parser() -> argparse.ArgumentParser:
     passport.add_argument("--library", required=True)
     passport.add_argument("--destination", required=True)
     passport.add_argument("--output", required=True)
-    passport.add_argument("--locale", default="zh-CN")
+    passport.add_argument("--locale", choices=("zh-CN", "en-US", "en"), default="zh-CN")
     passport.add_argument("--content-depth", choices=("deep", "standard", "compact"), default="standard")
     passport.add_argument("--visitor-mode", action="store_true")
     passport.add_argument("--operation-id", default="")
@@ -3012,7 +3407,7 @@ def build_parser() -> argparse.ArgumentParser:
     undo = sub.add_parser("undo")
     undo.add_argument("--library", required=True)
     undo.add_argument("--event-id", default="")
-    undo.add_argument("--operation-id", default="")
+    undo.add_argument("--operation-id", required=True)
     undo.set_defaults(func=command_undo)
 
     resolve = sub.add_parser("resolve")
@@ -3064,8 +3459,11 @@ def build_parser() -> argparse.ArgumentParser:
     share.set_defaults(func=command_share)
 
     onboarding = sub.add_parser("onboarding")
-    onboarding.add_argument("--locale", default="zh-CN")
+    onboarding.add_argument("--locale", choices=("zh-CN", "en-US", "en"), default="zh-CN")
     onboarding.set_defaults(func=command_onboarding)
+    for command_parser in sub.choices.values():
+        if not any("--locale" in action.option_strings for action in command_parser._actions):
+            command_parser.add_argument("--locale", choices=("zh-CN", "en-US", "en"), default="zh-CN")
     return parser
 
 
@@ -3076,7 +3474,7 @@ def main() -> int:
         result = args.func(args)
         return int(result or 0)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
-        print(json.dumps({"code": "ERROR", "message": str(exc)}, ensure_ascii=False), file=sys.stderr)
+        print(json.dumps(localized_cli_error(exc, getattr(args, "locale", "zh-CN")), ensure_ascii=False), file=sys.stderr)
         return 1
 
 

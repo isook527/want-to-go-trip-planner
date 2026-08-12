@@ -1,0 +1,100 @@
+{
+  "schemaVersion": "kornvia-skill-release-manifest-1",
+  "packageName": "want-to-go-trip-planner",
+  "packageVersion": "2.4.2",
+  "contractVersion": "2.3.0",
+  "rootDirectory": "want-to-go-trip-planner",
+  "fileCount": 18,
+  "files": [
+    {
+      "path": "LICENSE",
+      "size": 1093,
+      "sha256": "bd4de83b08ffd5e487f00efc4a9d22016190634127717f4d1b5b770c41c21be4"
+    },
+    {
+      "path": "SKILL.md",
+      "size": 31601,
+      "sha256": "f8bfaa0f8039b5d3e594b42d5c83f06e98011d5687cb30564c050081e649b3e9"
+    },
+    {
+      "path": "agents/openai.yaml",
+      "size": 382,
+      "sha256": "653e4cba85b36fcae0b89bdc78a4f49813c434fa6e550803e80f0688a704f5bc"
+    },
+    {
+      "path": "config/product.json",
+      "size": 14156,
+      "sha256": "0763038389bab4be815ad141677dc6ad9f70f6f15ee8fe5536c9a98681148abf"
+    },
+    {
+      "path": "references/customer-output.md",
+      "size": 5087,
+      "sha256": "bcf2ed0eccd72daadbe8618ad9ee30d8e58aa8f7179e1bbc8e33f0cb1a36b387"
+    },
+    {
+      "path": "references/free-library-contract.md",
+      "size": 11147,
+      "sha256": "e07b3c164dc0215006ba0ea6b3627468602c43c43dd5d4c5196d367048d0f64b"
+    },
+    {
+      "path": "references/place-resolution.md",
+      "size": 3817,
+      "sha256": "a9c6cac4bb17e039426d572f05ef9d0dace6ccf9a10df2a6a0d6d22a63c880db"
+    },
+    {
+      "path": "references/provider-support.md",
+      "size": 9798,
+      "sha256": "f9e66c30f5af9b749c00299178f499d5d5941d51c5202bd234ec2a7e282e4189"
+    },
+    {
+      "path": "references/shared-data-contract-v2.schema.json",
+      "size": 23623,
+      "sha256": "80435575ebb3afb5ad7e3307d0ebff08d48e5a4e4885a12f680cc9804121e234"
+    },
+    {
+      "path": "renderer/kornvia-brand.mjs",
+      "size": 11115,
+      "sha256": "b15e405992efcc5b47197d0460cc586e829414ac6ba63805dfbc87c4d2c18b7a"
+    },
+    {
+      "path": "renderer/render_report.mjs",
+      "size": 24807,
+      "sha256": "0b21d44290e78980c7ffe7d732fb39b5ab98d58998ac7993e44d096b30cc096d"
+    },
+    {
+      "path": "scripts/build_release.py",
+      "size": 6548,
+      "sha256": "7076a6b75374c5e24f41cdb9a8840661c8fea0eedd9bc2c382c182cb930e1056"
+    },
+    {
+      "path": "scripts/doctor_windows.ps1",
+      "size": 3034,
+      "sha256": "f8ea8ab544b912dc01843d3db0777753f67431ff458f0b3fec574ac7c4552001"
+    },
+    {
+      "path": "scripts/extract_evidence.py",
+      "size": 91842,
+      "sha256": "27c342eabd60a671f29f2b20cd68097559e48009080968969399c6a52353b021"
+    },
+    {
+      "path": "scripts/ocr_macos.swift",
+      "size": 1633,
+      "sha256": "862c2c3204589e25beef9fb5830ecd34c95029e83476042a84612262f03be456"
+    },
+    {
+      "path": "scripts/prepare_display_image.py",
+      "size": 8744,
+      "sha256": "784e812a69a786a4752947a03953edf8d95e33b50008b98e6e8c08f83c449a24"
+    },
+    {
+      "path": "scripts/prepare_image_macos.swift",
+      "size": 1055,
+      "sha256": "835de67a0b0814c7d575bc0b4889acb82b2450f56068615e547f85433dc34d6d"
+    },
+    {
+      "path": "scripts/want_to_go.py",
+      "size": 159682,
+      "sha256": "55c48f0ad077f91f9d4fdeb0a9f8fccad5192ed54de4b566fcb64b701a307686"
+    }
+  ]
+}
