@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://kornvia.com/contracts/want-to-go/2.2.0/schema.json",
+  "$id": "https://kornvia.com/contracts/want-to-go/2.3.0/schema.json",
   "title": "Kornvia Want-to-Go shared data contract",
-  "description": "Version 2.2.0 contract shared by the local Skill and read-only website consumers.",
+  "description": "Version 2.3.0 contract shared by the local Skill and read-only website consumers.",
   "type": "object",
   "required": [
     "schemaVersion",
@@ -20,7 +20,7 @@
     "tombstones"
   ],
   "properties": {
-    "schemaVersion": {"const": "2.2.0"},
+    "schemaVersion": {"const": "2.3.0"},
     "id": {"type": "string", "minLength": 1},
     "revision": {"type": "integer", "minimum": 0},
     "createdAt": {"$ref": "#/$defs/timestamp"},
@@ -48,7 +48,7 @@
       "type": "object",
       "required": ["version", "accessLevel", "canSupport", "cannotProve", "untrustedInstructionsDetected"],
       "properties": {
-        "version": {"const": "2.2.0"},
+        "version": {"const": "2.3.0"},
         "accessLevel": {"enum": ["submitted", "local_only", "public_readable", "public_blocked", "unavailable"]},
         "canSupport": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
         "cannotProve": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
@@ -192,7 +192,7 @@
         "destination": {"type": "string"},
         "submittedAt": {"$ref": "#/$defs/timestamp"},
         "submittedUrl": {"type": "string", "format": "uri", "pattern": "^https?://"},
-        "platform": {"enum": ["generic_web", "xiaohongshu", "ctrip", "wechat_official", "mafengwo"]},
+        "platform": {"enum": ["generic_web", "xiaohongshu", "ctrip", "wechat_official", "mafengwo", "douyin", "tiktok", "instagram", "youtube"]},
         "platformItemId": {"type": "string"},
         "platformAccess": {"$ref": "#/$defs/platformAccess"},
         "sourcePolicy": {"$ref": "#/$defs/sourcePolicy"},
@@ -242,7 +242,7 @@
         "tripRequestId": {"type": "string", "minLength": 1},
         "legacyImported": {"type": "boolean"},
         "checkedAt": {"$ref": "#/$defs/timestamp"},
-        "sourcePolicyVersion": {"const": "2.2.0"},
+        "sourcePolicyVersion": {"const": "2.3.0"},
         "items": {"type": "array", "items": {"$ref": "#/$defs/verificationItem"}},
         "tripRisks": {"type": "array", "items": {"$ref": "#/$defs/executionRisk"}},
         "changes": {"type": "array", "items": {"type": "object"}},
@@ -369,7 +369,7 @@
   },
   "examples": [
     {
-      "schemaVersion": "2.2.0",
+      "schemaVersion": "2.3.0",
       "id": "library-demo",
       "revision": 1,
       "createdAt": "2026-08-09T00:00:00Z",
@@ -414,7 +414,7 @@
           "destinationKey": "bangkok",
           "submittedAt": "2026-08-09T00:00:00Z",
           "sourcePolicy": {
-            "version": "2.2.0",
+            "version": "2.3.0",
             "accessLevel": "local_only",
             "canSupport": ["screenshot_content"],
             "cannotProve": ["original_url"],
@@ -433,7 +433,7 @@
           "submittedAt": "2026-08-09T00:00:00Z",
           "submittedUrl": "https://example.com/customer-submitted",
           "sourcePolicy": {
-            "version": "2.2.0",
+            "version": "2.3.0",
             "accessLevel": "public_readable",
             "canSupport": ["original_url", "public_page_facts"],
             "cannotProve": ["future_opening_status"],
@@ -464,7 +464,7 @@
           "serviceContext": "manual_itinerary_beta",
           "tripRequestId": "request-demo",
           "checkedAt": "2026-08-09T00:00:00Z",
-          "sourcePolicyVersion": "2.2.0",
+          "sourcePolicyVersion": "2.3.0",
           "items": [
             {
               "placeId": "place-commons",

@@ -18,11 +18,13 @@ import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
+import urllib.error
 import urllib.request
 
 
 MAX_HTML_BYTES = 2 * 1024 * 1024
+MAX_JSON_BYTES = 512 * 1024
 MAX_IMAGE_BYTES = 25 * 1024 * 1024
 MAX_VIDEO_BYTES = 250 * 1024 * 1024
 MAX_VIDEO_SCENES = 24
@@ -33,18 +35,17 @@ EVIDENCE_SCHEMA_VERSION = str(PRODUCT_CONFIG["contractVersion"])
 SOURCE_POLICY_VERSION = str(PRODUCT_CONFIG["sourcePolicyVersion"])
 MIN_PYTHON_VERSION = (3, 9)
 MIN_NODE_MAJOR = 18
-PLATFORM_MEDIA_HOSTS = {
-    "xiaohongshu.com",
-    "xhslink.com",
-    "xhslink.cn",
-    "douyin.com",
-    "iesdouyin.com",
-    "tiktok.com",
-    "instagram.com",
-    "youtube.com",
-    "youtu.be",
-}
 PLATFORM_IMPORTS = PRODUCT_CONFIG.get("platformImports") or {}
+PLATFORM_MEDIA_HOSTS = {
+    domain
+    for platform in {"xiaohongshu", "douyin", "tiktok", "instagram", "youtube"}
+    for domain in (PLATFORM_IMPORTS.get(platform) or {}).get("domains", [])
+}
+PUBLIC_METADATA_ENDPOINT_HOSTS = {
+    "www.tiktok.com",
+    "www.youtube.com",
+    "graph.facebook.com",
+}
 TIME_PATTERN = re.compile(
     r"(?:[01]?\d|2[0-3])[:：][0-5]\d\s*(?:-|–|—|至|~)\s*"
     r"(?:[01]?\d|2[0-3])[:：][0-5]\d"
@@ -101,11 +102,78 @@ LATIN_PLACE_PATTERN = re.compile(
 )
 UNTRUSTED_INSTRUCTION_PATTERN = re.compile(
     r"(?:ignore\s+(?:all\s+)?(?:previous|prior|above)\s+instructions?|"
+    r"disregard\s+(?:all\s+)?(?:previous|prior|earlier)\s+(?:instructions?|guidance)|"
+    r"override\s+(?:the\s+)?(?:system|developer|previous)\s+(?:prompt|message|instructions?)|"
+    r"(?:new\s+task|act\s+as|developer\s+mode)\s*[:：]?|"
     r"system\s+prompt|developer\s+message|reveal\s+(?:the\s+)?prompt|"
     r"忽略(?:之前|以上|前面)(?:所有)?(?:指令|要求)|系统提示词|开发者消息|"
+    r"(?:新任务|请执行|开发者模式)\s*[:：]?|"
     r"按以下(?:指令|要求)执行|不要遵守(?:之前|系统)(?:指令|要求))",
     re.IGNORECASE,
 )
+
+CLI_ERROR_MESSAGES = {
+    "zh-CN": {
+        "ARGUMENT_ERROR": "命令参数不完整或格式不正确，请按帮助中的参数重新执行。",
+        "PLATFORM_ADAPTER_UNAVAILABLE": "当前平台读取组件不可用；原始资料不会丢失，请安装依赖或改用截图、原视频或文字。",
+        "PLATFORM_READ_FAILED": "平台公开内容本轮读取失败；原链接已保留，请稍后重试或补截图、原视频或文字。",
+        "FILE_ERROR": "无法读取或写入指定文件，请检查路径、权限和文件状态。",
+        "JSON_ERROR": "JSON 文件格式不正确，请修正后重试。",
+        "NETWORK_ERROR": "公开网络内容读取失败；原链接已保留，请检查网络后重试。",
+        "INVALID_INPUT": "输入内容不符合要求，请核对文件类型、大小、链接和必填字段。",
+        "ERROR": "证据提取未完成，请检查输入和依赖状态后重试。",
+    },
+    "en-US": {
+        "ARGUMENT_ERROR": "Command arguments are missing or invalid. Check the help text and try again.",
+        "PLATFORM_ADAPTER_UNAVAILABLE": "The platform reader is unavailable. Your source is retained; install the dependency or provide screenshots, the original video or text.",
+        "PLATFORM_READ_FAILED": "The public platform content could not be read in this run. The original URL is retained; retry later or provide screenshots, the original video or text.",
+        "FILE_ERROR": "The requested file could not be read or written. Check its path, permissions and state.",
+        "JSON_ERROR": "The JSON file is invalid. Correct it and try again.",
+        "NETWORK_ERROR": "The public network content could not be read. The original URL is retained; check the connection and retry.",
+        "INVALID_INPUT": "The input is invalid. Check file type, size, URL and required fields.",
+        "ERROR": "Evidence extraction did not complete. Check the input and dependency status, then try again.",
+    },
+}
+
+
+def normalized_locale(value):
+    return "en-US" if str(value or "").lower().startswith("en") else "zh-CN"
+
+
+def requested_cli_locale(argv):
+    for index, value in enumerate(argv):
+        if value in {"--locale", "--output-locale"} and index + 1 < len(argv):
+            return normalized_locale(argv[index + 1])
+        if value.startswith(("--locale=", "--output-locale=")):
+            return normalized_locale(value.split("=", 1)[1])
+    return "zh-CN"
+
+
+def cli_error_payload(error, locale):
+    message = str(error)
+    prefix = re.match(r"^([A-Z][A-Z0-9_]{2,}):", message)
+    code = prefix.group(1) if prefix else "ERROR"
+    lowered = message.casefold()
+    if isinstance(error, json.JSONDecodeError):
+        code = "JSON_ERROR"
+    elif isinstance(error, OSError):
+        code = "NETWORK_ERROR" if isinstance(error, urllib.error.URLError) else "FILE_ERROR"
+    elif code == "ERROR" and any(token in lowered for token in ("must ", "required", "invalid", "does not exist", "exceeds", "unsupported")):
+        code = "INVALID_INPUT"
+    normalized = normalized_locale(locale)
+    messages = CLI_ERROR_MESSAGES[normalized]
+    if code.startswith("PLATFORM_") and code not in messages:
+        safe_message = message.split(":", 1)[1].strip() if ":" in message else messages["ERROR"]
+    else:
+        safe_message = messages.get(code, messages["ERROR"])
+    return {"code": code, "message": safe_message}
+
+
+class LocalizedArgumentParser(argparse.ArgumentParser):
+    def error(self, message):
+        locale = requested_cli_locale(sys.argv[1:])
+        payload = {"code": "ARGUMENT_ERROR", "message": CLI_ERROR_MESSAGES[locale]["ARGUMENT_ERROR"]}
+        self.exit(2, json.dumps(payload, ensure_ascii=False) + "\n")
 
 
 def now():
@@ -232,8 +300,7 @@ def run_opencli(arguments, timeout=60, expect_json=False):
         check=False,
     )
     if result.returncode != 0:
-        message = clean_text(result.stderr or result.stdout)[:500]
-        raise ValueError(f"PLATFORM_READ_FAILED: {message or 'opencli returned an error'}")
+        raise ValueError(f"PLATFORM_READ_FAILED: opencli exited with code {result.returncode}")
     output = result.stdout.strip()
     if expect_json:
         try:
@@ -577,6 +644,20 @@ def fetch_platform_link(url, source, args):
             "PLATFORM_SECURITY_CHECK: 马蜂窝公开正文触发安全检测；原链接已保留，请补截图、保存网页或粘贴文字",
             "PLATFORM_SECURITY_CHECK: Mafengwo blocked the public article with a security check. The original URL was retained; provide screenshots, a saved page or pasted text.",
         ))
+    if platform == "douyin":
+        return douyin_evidence(url, source, args)
+    if platform == "tiktok":
+        return oembed_evidence(
+            url, source, args, "tiktok", "https://www.tiktok.com/oembed",
+            "official_public_oembed",
+        )
+    if platform == "instagram":
+        return instagram_evidence(url, source, args)
+    if platform == "youtube":
+        return oembed_evidence(
+            url, source, args, "youtube", "https://www.youtube.com/oembed",
+            "public_oembed_metadata",
+        )
     document, final_url = fetch_public_link(url, args.timeout)
     parsed = parse_html_evidence(document)
     parsed["platform"] = platform
@@ -659,22 +740,43 @@ def public_http_url(value):
         }
     except socket.gaierror as error:
         raise ValueError(f"cannot resolve link host: {error}") from error
-    for address in addresses:
-        ip = ipaddress.ip_address(address)
-        if not ip.is_global:
-            raise ValueError("link host resolves to a non-public address")
+    global_addresses = {
+        address for address in addresses if ipaddress.ip_address(address).is_global
+    }
+    if not global_addresses:
+        raise ValueError("link host resolves to a non-public address")
+    if parsed.hostname.casefold() not in PUBLIC_METADATA_ENDPOINT_HOSTS:
+        for address in addresses:
+            if not ipaddress.ip_address(address).is_global:
+                raise ValueError("link host resolves to a non-public address")
     return parsed.geturl()
 
 
-def validate_connected_peer(response):
+def validate_connected_peer(response, request_url=""):
     file_pointer = getattr(response, "fp", None)
     raw = getattr(file_pointer, "raw", None)
     sock = getattr(raw, "_sock", None)
     if sock is None:
-        return
+        raise ValueError("link connected peer could not be verified")
     address = sock.getpeername()[0]
-    if not ipaddress.ip_address(address).is_global:
-        raise ValueError("link connected to a non-public address")
+    peer_ip = ipaddress.ip_address(address)
+    if peer_ip.is_global:
+        return
+    request_scheme = urlparse(clean_text(request_url)).scheme
+    proxy_url = clean_text(urllib.request.getproxies().get(request_scheme))
+    proxy_host = urlparse(proxy_url).hostname if proxy_url else ""
+    proxy_addresses = set()
+    if proxy_host:
+        try:
+            proxy_addresses = {
+                item[4][0]
+                for item in socket.getaddrinfo(proxy_host, None, type=socket.SOCK_STREAM)
+            }
+        except socket.gaierror:
+            proxy_addresses = set()
+    if address in proxy_addresses:
+        return
+    raise ValueError("link connected to a non-public address")
 
 
 class PublicRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -729,7 +831,7 @@ def fetch_public_link(url, timeout):
     opener = urllib.request.build_opener(PublicRedirectHandler())
     with opener.open(request, timeout=timeout) as response:
         public_http_url(response.geturl())
-        validate_connected_peer(response)
+        validate_connected_peer(response, safe_url)
         content_type = str(response.headers.get("content-type", "")).lower()
         if "html" not in content_type:
             raise ValueError("link did not return an HTML page")
@@ -738,6 +840,197 @@ def fetch_public_link(url, timeout):
             raise ValueError("link page exceeds 2 MB")
         charset = response.headers.get_content_charset() or "utf-8"
         return raw.decode(charset, errors="replace"), response.geturl()
+
+
+def fetch_public_json(url, timeout):
+    safe_url = public_http_url(url)
+    request = urllib.request.Request(
+        safe_url,
+        headers={
+            "User-Agent": f"WantToGoTripPlanner/{PRODUCT_CONFIG['version']} (+public-evidence-only)",
+            "Accept": "application/json",
+        },
+    )
+    opener = urllib.request.build_opener(PublicRedirectHandler())
+    with opener.open(request, timeout=timeout) as response:
+        public_http_url(response.geturl())
+        validate_connected_peer(response, safe_url)
+        raw = response.read(MAX_JSON_BYTES + 1)
+        if len(raw) > MAX_JSON_BYTES:
+            raise ValueError("public metadata response exceeds 512 KB")
+        charset = response.headers.get_content_charset() or "utf-8"
+        try:
+            payload = json.loads(raw.decode(charset, errors="replace"))
+        except json.JSONDecodeError as error:
+            raise ValueError("public metadata endpoint returned invalid JSON") from error
+        if not isinstance(payload, dict):
+            raise ValueError("public metadata endpoint returned an unsupported result")
+        return payload, response.geturl()
+
+
+def social_item_id(url, platform):
+    parsed = urlparse(clean_text(url))
+    path = parsed.path or ""
+    if platform == "tiktok":
+        match = re.search(r"/@[^/]+/video/(\d+)", path)
+    elif platform == "instagram":
+        match = re.search(r"/(?:p|reel|tv)/([A-Za-z0-9_-]+)", path)
+    elif platform == "youtube":
+        if host_matches(parsed.hostname, ["youtu.be"]):
+            match = re.match(r"/([A-Za-z0-9_-]{6,})", path)
+        else:
+            query_id = clean_text((parse_qs(parsed.query).get("v") or [""])[0])
+            match = re.search(r"/(?:shorts|embed)/([A-Za-z0-9_-]{6,})", path)
+            if query_id:
+                return query_id
+    else:
+        match = re.search(r"/video/(\d+)", path)
+    return clean_text(match.group(1)) if match else ""
+
+
+def oembed_evidence(url, source, args, platform, endpoint, mode):
+    locale = getattr(args, "output_locale", "zh-CN")
+    item_id = social_item_id(url, platform)
+    parsed_url = urlparse(url)
+    if platform == "tiktok" and not item_id and not host_matches(
+        parsed_url.hostname, ["vm.tiktok.com", "vt.tiktok.com"],
+    ):
+        raise ValueError(locale_text(
+            locale,
+            "PLATFORM_INPUT_INCOMPLETE: TikTok 原链接已保留；请提供公开视频链接，或补原视频、截图或文字",
+            "PLATFORM_INPUT_INCOMPLETE: The TikTok URL was retained. Provide a public video URL, or add the original video, screenshots or text.",
+        ))
+    if platform == "youtube" and not item_id:
+        raise ValueError(locale_text(
+            locale,
+            "PLATFORM_INPUT_INCOMPLETE: YouTube 原链接已保留；请提供公开视频或 Shorts 链接",
+            "PLATFORM_INPUT_INCOMPLETE: The YouTube URL was retained. Provide a public video or Shorts URL.",
+        ))
+    metadata_url = f"{endpoint}?{urlencode({'url': url})}"
+    if platform == "youtube":
+        metadata_url += "&format=json"
+    try:
+        payload, _ = fetch_public_json(metadata_url, args.timeout)
+    except (OSError, ValueError, urllib.error.HTTPError) as error:
+        raise ValueError(locale_text(
+            locale,
+            f"PLATFORM_CONTENT_UNAVAILABLE: {platform} 公开元数据不可用；原链接已保留，请补原视频、截图或文字",
+            f"PLATFORM_CONTENT_UNAVAILABLE: {platform} public metadata is unavailable. The original URL was retained; provide the original video, screenshots or text.",
+        )) from error
+    title = clean_text(payload.get("title"))
+    author = clean_text(payload.get("author_name"))
+    provider = clean_text(payload.get("provider_name"))
+    if not title and not clean_text(source.get("name") or getattr(args, "name", "")):
+        raise ValueError(locale_text(
+            locale,
+            "PLATFORM_INPUT_INCOMPLETE: Instagram 公开嵌入已确认，但未返回可用的地点文字；原链接已保留，请补地点名、截图、原视频或文字",
+            "PLATFORM_INPUT_INCOMPLETE: The public Instagram embed was confirmed but returned no usable place text. The original URL was retained; add the place name, screenshots, original video or text.",
+        ))
+    original = "\n".join(unique([title, author, provider]))
+    capabilities = ["public_embed_confirmed"]
+    if title:
+        capabilities.append("oembed_title_observed")
+    if author:
+        capabilities.append("oembed_author_observed")
+    thumbnail = clean_text(payload.get("thumbnail_url"))
+    if thumbnail:
+        capabilities.append("oembed_thumbnail_url_observed")
+    return {
+        "title": title,
+        "description": "",
+        "structuredNames": [],
+        "structuredAddresses": [],
+        "originalText": original,
+        "mediaType": "video" if platform in {"tiktok", "youtube"} else "page",
+        "publicVideoUrls": [],
+        "thumbnailUrl": thumbnail,
+        "platform": platform,
+        "platformItemId": item_id or clean_text(
+            payload.get("embed_product_id") or payload.get("author_unique_id")
+        ),
+        "pageContentObserved": False,
+        "platformMedia": True,
+        "platformAccess": {
+            "mode": mode,
+            "status": "readable",
+            "checkedAt": now(),
+            "capabilities": capabilities,
+            "limitations": [
+                "full_post_body_not_observed",
+                "video_binary_not_downloaded",
+                "captions_or_spoken_words_not_observed",
+                "place_identity_not_proven_by_platform_metadata",
+            ],
+        },
+    }
+
+
+def instagram_evidence(url, source, args):
+    parsed = urlparse(url)
+    if re.search(r"/stories/", parsed.path or "", re.IGNORECASE):
+        raise ValueError(locale_text(
+            getattr(args, "output_locale", "zh-CN"),
+            "PLATFORM_INPUT_INCOMPLETE: Instagram Story 不支持自动读取；原链接已保留，请补截图、原视频或文字",
+            "PLATFORM_INPUT_INCOMPLETE: Instagram Stories are not supported for automatic reading. The original URL was retained; provide screenshots, the original video or text.",
+        ))
+    if not social_item_id(url, "instagram"):
+        raise ValueError(locale_text(
+            getattr(args, "output_locale", "zh-CN"),
+            "PLATFORM_INPUT_INCOMPLETE: Instagram 原链接已保留；请提供公开帖子或 Reel 链接",
+            "PLATFORM_INPUT_INCOMPLETE: The Instagram URL was retained. Provide a public post or Reel URL.",
+        ))
+    return oembed_evidence(
+        url, source, args, "instagram",
+        "https://graph.facebook.com/v25.0/instagram_oembed",
+        "official_tokenless_oembed_with_local_fallback",
+    )
+
+
+def douyin_evidence(url, source, args):
+    locale = getattr(args, "output_locale", "zh-CN")
+    parsed_url = urlparse(url)
+    if not social_item_id(url, "douyin") and not host_matches(
+        parsed_url.hostname, ["v.douyin.com"],
+    ):
+        raise ValueError(locale_text(
+            locale,
+            "PLATFORM_INPUT_INCOMPLETE: 抖音原链接已保留；请提供具体公开作品链接或分享短链",
+            "PLATFORM_INPUT_INCOMPLETE: The Douyin URL was retained. Provide a specific public video URL or share short link.",
+        ))
+    try:
+        document, final_url = fetch_public_link(url, args.timeout)
+    except (OSError, ValueError, urllib.error.HTTPError) as error:
+        raise ValueError(locale_text(
+            locale,
+            "PLATFORM_SECURITY_CHECK: 抖音公开页本轮无法读取；原链接已保留，请补原视频、截图或文字",
+            "PLATFORM_SECURITY_CHECK: The public Douyin page could not be read in this run. The original URL was retained; provide the original video, screenshots or text.",
+        )) from error
+    parsed = parse_html_evidence(document)
+    if not parsed["originalText"]:
+        raise ValueError(locale_text(
+            locale,
+            "PLATFORM_CONTENT_UNAVAILABLE: 抖音页面未返回可用文字；原链接已保留，请补原视频、截图或文字",
+            "PLATFORM_CONTENT_UNAVAILABLE: The Douyin page returned no usable text. The original URL was retained; provide the original video, screenshots or text.",
+        ))
+    parsed.update({
+        "platform": "douyin",
+        "platformItemId": social_item_id(final_url, "douyin") or social_item_id(url, "douyin"),
+        "finalUrl": final_url,
+        "platformMedia": True,
+        "platformAccess": {
+            "mode": "public_share_page_with_local_fallback",
+            "status": "readable",
+            "checkedAt": now(),
+            "capabilities": ["public_page_metadata_observed"],
+            "limitations": [
+                "official_richer_video_api_requires_authorization",
+                "video_binary_not_downloaded",
+                "captions_or_spoken_words_not_proven_complete",
+                "place_identity_not_proven_by_platform_metadata",
+            ],
+        },
+    })
+    return parsed
 
 
 def parse_html_evidence(document):
@@ -1427,6 +1720,7 @@ def preserve_screenshot_asset(evidence, source, output_path, bundle_id, storage_
     if evidence.get("sourceType") != "screenshot" or not os.path.isfile(original):
         return evidence
     target_path = original
+    original_sha = file_sha256(original)
     asset_root = ""
     if output_path:
         output = os.path.abspath(output_path)
@@ -1442,15 +1736,19 @@ def preserve_screenshot_asset(evidence, source, output_path, bundle_id, storage_
             extension = ".png"
         target_path = os.path.join(
             asset_root,
-            f"{safe_asset_token(source.get('id') or evidence.get('sourceId'))}{extension}",
+            f"{safe_asset_token(source.get('id') or evidence.get('sourceId'))}.{original_sha[:16]}{extension}",
         )
         if os.path.realpath(original) != os.path.realpath(target_path):
             shutil.copy2(original, target_path)
     evidence["localPath"] = target_path
-    evidence["originalSha256"] = file_sha256(target_path)
+    evidence["originalSha256"] = original_sha
     evidence["originalImmutable"] = True
     evidence["assetStorage"] = "durable_copy" if target_path != original else "source_path"
-    display_stem = safe_asset_token(source.get("id") or evidence.get("sourceId"))
+    if not asset_root:
+        evidence["displayPhotoEligible"] = False
+        evidence["displayPhotoStatus"] = "output_required_for_display_crop"
+        return evidence
+    display_stem = f"{safe_asset_token(source.get('id') or evidence.get('sourceId'))}.{original_sha[:16]}"
     display_path = (
         os.path.join(asset_root, f"{display_stem}.display.jpg")
         if asset_root
@@ -1518,14 +1816,30 @@ def write_result(value, output):
         try:
             with os.fdopen(file_descriptor, "w", encoding="utf-8") as handle:
                 handle.write(serialized)
+                handle.flush()
+                os.fsync(handle.fileno())
             os.chmod(temporary, 0o600)
             os.replace(temporary, output)
+            fsync_directory(parent)
         except Exception:
             if os.path.exists(temporary):
                 os.unlink(temporary)
             raise
     else:
         print(serialized, end="")
+
+
+def fsync_directory(path):
+    try:
+        descriptor = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(descriptor)
+    except OSError:
+        pass
+    finally:
+        os.close(descriptor)
 
 
 def extract(args):
@@ -1945,6 +2259,10 @@ def doctor_report(locale="zh-CN"):
                 "ctrip": bool(opencli["ready"]),
                 "wechatOfficial": bool(opencli["ready"]),
                 "mafengwo": "local_evidence_fallback",
+                "douyin": "public_page_with_local_fallback",
+                "tiktok": "official_public_oembed",
+                "instagram": "official_oembed_with_local_fallback",
+                "youtube": "public_oembed_metadata",
             },
         },
         "dependencies": {
@@ -1982,7 +2300,7 @@ def doctor(args):
     print(json.dumps(doctor_report(args.output_locale), ensure_ascii=False, indent=2))
 
 
-def add_common_arguments(target):
+def add_common_arguments(target, output_required=False):
     target.add_argument("--name", default="")
     target.add_argument("--city", default="")
     target.add_argument("--country-code", default="")
@@ -2000,14 +2318,14 @@ def add_common_arguments(target):
     )
     target.add_argument("--languages", default="")
     target.add_argument("--timeout", type=int, default=15)
-    target.add_argument("--output")
+    target.add_argument("--output", required=output_required)
 
 
 def parser():
-    root = argparse.ArgumentParser(
+    root = LocalizedArgumentParser(
         description="Extract local place evidence from a screenshot, public link, or text"
     )
-    sub = root.add_subparsers(dest="command", required=True)
+    sub = root.add_subparsers(dest="command", required=True, parser_class=LocalizedArgumentParser)
     p_extract = sub.add_parser("extract")
     source = p_extract.add_mutually_exclusive_group(required=True)
     source.add_argument("--screenshot")
@@ -2020,7 +2338,7 @@ def parser():
     p_extract.set_defaults(func=extract)
     p_batch = sub.add_parser("batch")
     p_batch.add_argument("--manifest", required=True)
-    add_common_arguments(p_batch)
+    add_common_arguments(p_batch, output_required=True)
     p_batch.set_defaults(func=batch_extract)
     p_doctor = sub.add_parser("doctor")
     p_doctor.add_argument(
@@ -2044,4 +2362,6 @@ if __name__ == "__main__":
         json.JSONDecodeError,
         subprocess.SubprocessError,
     ) as error:
-        raise SystemExit(str(error))
+        payload = cli_error_payload(error, getattr(arguments, "output_locale", "zh-CN"))
+        print(json.dumps(payload, ensure_ascii=False), file=sys.stderr)
+        raise SystemExit(1)

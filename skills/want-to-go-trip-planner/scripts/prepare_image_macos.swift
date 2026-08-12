@@ -26,6 +26,9 @@ process.arguments = [
     script.path,
     CommandLine.arguments[1],
     CommandLine.arguments[2],
+    "--target-aspect",
+    "4:3",
+    "--json",
 ]
 process.standardOutput = FileHandle.standardOutput
 process.standardError = FileHandle.standardError
