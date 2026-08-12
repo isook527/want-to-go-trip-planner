@@ -394,7 +394,7 @@ python3 scripts/want_to_go.py repair --library want-to-go.json
 python3 scripts/want_to_go.py validate --library want-to-go.json
 python3 scripts/want_to_go.py export --library want-to-go.json --output export.json
 python3 scripts/want_to_go.py scan --path 想去护照.html --mode customer
-python3 scripts/want_to_go.py scan --path want-to-go-trip-planner-skill-2.4.2.zip --mode package
+python3 scripts/want_to_go.py scan --path want-to-go-trip-planner-skill-2.4.3.zip --mode package
 ```
 
 - `migrate --dry-run` 只报告；正式迁移原子写入并记录事件。v1.2.3 原始来源和媒体不得丢失。旧按需复核只能标为 `pre_trip_on_demand_legacy`，不得伪造双方约定日期；旧范围需求保留原值并标记 `legacyImported`。
@@ -406,11 +406,11 @@ python3 scripts/want_to_go.py scan --path want-to-go-trip-planner-skill-2.4.2.zi
 正式发布包使用确定性构建器生成并复验：
 
 ```bash
-python3 scripts/build_release.py --zip ../../dist/want-to-go-trip-planner-skill-2.4.2.zip
-python3 scripts/build_release.py --verify --zip ../../dist/want-to-go-trip-planner-skill-2.4.2.zip
+python3 scripts/build_release.py --zip ../../dist/want-to-go-trip-planner-skill-2.4.3.zip
+python3 scripts/build_release.py --verify --zip ../../dist/want-to-go-trip-planner-skill-2.4.3.zip
 ```
 
-构建器同时生成 `.zip.sha256`。GitHub 的 `v2.4.2` 标签流程使用固定提交的 Actions 生成 provenance attestation；本地 checksum 证明文件完整性，远端 attestation 在标签流程实际成功后证明 GitHub 仓库与构建工作流来源。
+构建器同时生成 `.zip.sha256`。GitHub 的 `v2.4.3` 标签流程使用固定提交的 Actions 生成 provenance attestation；本地 checksum 证明文件完整性，远端 attestation 在标签流程实际成功后证明 GitHub 仓库与构建工作流来源。
 
 ## 命令主流程
 
