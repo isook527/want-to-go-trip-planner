@@ -10,7 +10,7 @@ on:
       - codex/want-to-go-v2-4-platforms
       - codex/want-to-go-v2-4-audit
     tags:
-      - v2.4.2
+      - v2.4.3
 
 permissions:
   contents: read
@@ -76,24 +76,24 @@ jobs:
         shell: pwsh
         run: |
           node --check skills/want-to-go-trip-planner/renderer/render_report.mjs
-          python skills/want-to-go-trip-planner/scripts/build_release.py --verify --zip dist/want-to-go-trip-planner-skill-2.4.2.zip
-          python skills/want-to-go-trip-planner/scripts/want_to_go.py scan --path dist/want-to-go-trip-planner-skill-2.4.2.zip --mode package
-          python skills/want-to-go-trip-planner/scripts/want_to_go.py scan --path dist/want-to-go-trip-planner-v2.4.2-preview.html --mode customer
-          $zip = Get-FileHash dist/want-to-go-trip-planner-skill-2.4.2.zip -Algorithm SHA256
+          python skills/want-to-go-trip-planner/scripts/build_release.py --verify --zip dist/want-to-go-trip-planner-skill-2.4.3.zip
+          python skills/want-to-go-trip-planner/scripts/want_to_go.py scan --path dist/want-to-go-trip-planner-skill-2.4.3.zip --mode package
+          python skills/want-to-go-trip-planner/scripts/want_to_go.py scan --path dist/want-to-go-trip-planner-v2.4.3-preview.html --mode customer
+          $zip = Get-FileHash dist/want-to-go-trip-planner-skill-2.4.3.zip -Algorithm SHA256
           $zip.Hash | Out-File -FilePath windows-zip-sha256.txt -Encoding ascii
 
       - name: Attest release provenance
-        if: startsWith(github.ref, 'refs/tags/v2.4.2')
+        if: startsWith(github.ref, 'refs/tags/v2.4.3')
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
         with:
-          subject-path: dist/want-to-go-trip-planner-skill-2.4.2.zip
+          subject-path: dist/want-to-go-trip-planner-skill-2.4.3.zip
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: want-to-go-trip-planner-v2.4.2-windows-validated
+          name: want-to-go-trip-planner-v2.4.3-windows-validated
           path: |
-            dist/want-to-go-trip-planner-skill-2.4.2.zip
-            dist/want-to-go-trip-planner-skill-2.4.2.zip.sha256
+            dist/want-to-go-trip-planner-skill-2.4.3.zip
+            dist/want-to-go-trip-planner-skill-2.4.3.zip.sha256
             windows-doctor.json
             windows-zip-sha256.txt
           if-no-files-found: error
