@@ -22,12 +22,11 @@ export function passportTitle(destination, locale = "zh-CN") {
 }
 
 export const KORNVIA_REPORT_CSS = `
-:root{--yellow:${PRODUCT_CONFIG.brand.sunnyYellow};--canvas:#E9E8E3;--paper:#FBFAF7;--ink:#171717;
+:root{--yellow:${PRODUCT_CONFIG.brand.sunnyYellow};--canvas:#F6E8C8;--paper:#FBFAF7;--ink:#171717;
 --blue:#62B2DF;--brown:#955025;--muted:#5B564D;--line:rgba(23,23,23,.18);--shadow:8px 8px 0 var(--ink)}
 *{box-sizing:border-box}
 html{background:var(--canvas)}
-body{margin:0;color:var(--ink);background:radial-gradient(circle at 8% 4%,rgba(255,255,255,.88),transparent 24rem),
-linear-gradient(rgba(23,23,23,.018) 1px,transparent 1px),var(--canvas);background-size:auto,100% 32px,auto;
+body{margin:0;color:var(--ink);background:var(--canvas);
 font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif}
 .shell{width:min(1180px,calc(100% - 28px));margin:auto;padding:24px 0 70px}
 .ticket,.card,.retained,.upgrade{border:5px solid var(--ink);border-radius:26px;background:var(--paper)}

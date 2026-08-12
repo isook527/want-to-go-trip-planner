@@ -1,7 +1,7 @@
 {
   "schemaVersion": "kornvia-skill-release-manifest-1",
   "packageName": "want-to-go-trip-planner",
-  "packageVersion": "2.4.1",
+  "packageVersion": "2.4.2",
   "contractVersion": "2.3.0",
   "rootDirectory": "want-to-go-trip-planner",
   "fileCount": 18,
@@ -14,7 +14,7 @@
     {
       "path": "SKILL.md",
       "size": 31601,
-      "sha256": "bdc1d7448391006528b7d149816271739e40e48dffc16f4a6d68c3a452be8004"
+      "sha256": "f8bfaa0f8039b5d3e594b42d5c83f06e98011d5687cb30564c050081e649b3e9"
     },
     {
       "path": "agents/openai.yaml",
@@ -24,7 +24,7 @@
     {
       "path": "config/product.json",
       "size": 14156,
-      "sha256": "2ac3e5f3cfd2bc530b03c17990bb62a452b512f9f95a750bc7331e24bbaaa930"
+      "sha256": "0763038389bab4be815ad141677dc6ad9f70f6f15ee8fe5536c9a98681148abf"
     },
     {
       "path": "references/customer-output.md",
@@ -53,8 +53,8 @@
     },
     {
       "path": "renderer/kornvia-brand.mjs",
-      "size": 11282,
-      "sha256": "3f96cd911ff3bc6477b4bea3790e2322fbe30d3bbc257cbb93d7c032243a110e"
+      "size": 11115,
+      "sha256": "b15e405992efcc5b47197d0460cc586e829414ac6ba63805dfbc87c4d2c18b7a"
     },
     {
       "path": "renderer/render_report.mjs",
