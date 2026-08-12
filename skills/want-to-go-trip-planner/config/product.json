@@ -1,9 +1,9 @@
 {
-  "version": "2.4.2",
+  "version": "2.4.3",
   "contractVersion": "2.3.0",
   "sourcePolicyVersion": "2.3.0",
-  "passportTemplateMarker": "kornvia-passport-2.4.2",
-  "installDoctorMarker": "kornvia-install-doctor-2.4.2",
+  "passportTemplateMarker": "kornvia-passport-2.4.3",
+  "installDoctorMarker": "kornvia-install-doctor-2.4.3",
   "brand": {
     "productNameZh": "Kornvia 想去就出发",
     "productNameEn": "Kornvia Want to Go",

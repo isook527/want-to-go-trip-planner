@@ -247,7 +247,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
             "retainedClueCount": 2,
         }
         html = self.render(payload)
-        self.assertIn("kornvia-passport-2.4.2", html)
+        self.assertIn("kornvia-passport-2.4.3", html)
         self.assertIn("一张能带走的想去行程单", html)
         self.assertIn("想去库整理好后，也可以交给人工继续排。", html)
         self.assertIn(config["offers"]["free"]["price"], html)
@@ -436,7 +436,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
                 "retainedClueCount": 0,
             }
         )
-        self.assertIn("kornvia-passport-2.4.2", html)
+        self.assertIn("kornvia-passport-2.4.3", html)
         self.assertIn("--canvas:#F6E8C8", html)
         self.assertIn("body{margin:0;color:var(--ink);background:var(--canvas);", html)
         self.assertNotIn("#E9E8E3", html)
@@ -1430,8 +1430,8 @@ class PublicSkillRegressionTests(unittest.TestCase):
         self.assertIn("$productConfig.installDoctorMarker", windows_doctor)
         self.assertIn("PRODUCT_CONFIG.passportTemplateMarker", renderer)
         config = json.loads((SKILL / "config" / "product.json").read_text(encoding="utf-8"))
-        self.assertEqual(config["installDoctorMarker"], "kornvia-install-doctor-2.4.2")
-        self.assertEqual(config["passportTemplateMarker"], "kornvia-passport-2.4.2")
+        self.assertEqual(config["installDoctorMarker"], "kornvia-install-doctor-2.4.3")
+        self.assertEqual(config["passportTemplateMarker"], "kornvia-passport-2.4.3")
 
     def test_38_ffmpeg_doctor_uses_supported_version_flag(self):
         missing = {"installed": False, "version": "", "ready": False}
@@ -1489,7 +1489,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
 
     def test_43_product_config_is_the_single_commercial_and_version_source(self):
         config = product_config()
-        self.assertEqual(config["version"], "2.4.2")
+        self.assertEqual(config["version"], "2.4.3")
         self.assertTrue(config["offers"])
         self.assertEqual(config["form"]["publicOfferId"], "manual-itinerary-beta")
         self.assertTrue(config["form"]["intentOnly"])
@@ -3081,11 +3081,15 @@ class PublicSkillRegressionTests(unittest.TestCase):
         self.assertIn("Image preparation arguments", json.loads(result.stderr)["message"])
 
     def test_94_release_manifest_matches_archive_and_detects_tampering(self):
-        archive_path = ROOT / "dist" / "want-to-go-trip-planner-skill-2.4.2.zip"
+        archive_path = ROOT / "dist" / "want-to-go-trip-planner-skill-2.4.3.zip"
         self.assertTrue(archive_path.is_file())
         with zipfile.ZipFile(archive_path) as archive:
             self.assertEqual(W2G.release_manifest_issues(archive), [])
             names = archive.namelist()
+            self.assertIn("want-to-go-trip-planner/README.md", names)
+            readme = archive.read("want-to-go-trip-planner/README.md").decode("utf-8")
+            self.assertIn("当前版本：v2.4.3", readme)
+            self.assertIn("Current version: v2.4.3", readme)
             contents = {name: archive.read(name) for name in names if not name.endswith("/")}
         with tempfile.TemporaryDirectory() as tmp:
             tampered = Path(tmp) / "tampered.zip"
