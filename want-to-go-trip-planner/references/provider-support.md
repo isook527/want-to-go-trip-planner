@@ -1,5 +1,7 @@
 # 来源、系统与访问能力
 
+小红书、携程和微信公众号默认关闭自动读取。没有通过完整性检查的可选 `opencli` 时，只保留原链接，并请用户补截图或文字。安装受信版本并通过 doctor 后，才启用下表中的自动读取能力。
+
 ## 系统边界
 
 - macOS 与 Windows 是正式目标；首次使用必须运行 doctor。
@@ -11,7 +13,7 @@
 - `opencli` 可能复用本机已有浏览器的只读会话状态；Skill 不代用户登录、不导出或上传 Cookie，遇验证码、登录或安全检查立即停止并保留原始链接。不要从不明来源安装或替换该二进制。
 - PowerShell 5.1 脚本源保持 ASCII-safe，运行时从 UTF-8 配置读取版本；会话设置 `PYTHONUTF8=1` 与 `PYTHONIOENCODING=utf-8`。
 
-本地 macOS 测试和 PowerShell 静态检查不能替代真实 Windows runner。Windows workflow 已固定 Actions 完整提交、Chocolatey 包版本及 `chi_sim` 模型提交与 SHA-256；只有远端 runner 实际成功并产出 artifact 后，才能把该次提交标为 Windows 已验收。
+仓库的 `test.yml` 在 GitHub Windows runner 上执行安装检查和回归。缺少可选 OCR 时允许降级，核心依赖仍须就绪。
 
 ## `accessLevel`
 
@@ -72,6 +74,8 @@
 
 ## English provider and system boundary
 
+Automatic reading for Xiaohongshu, Ctrip and WeChat Official Accounts is off by default. Keep their links and request screenshots or text until the optional, integrity-checked `opencli` adapter passes doctor.
+
 - macOS and Windows are supported targets. Run doctor first. Core dependencies are Python 3.9+, Pillow and Node.js 18+. Windows OCR requires Tesseract with `eng` plus `chi_sim` or `chi_tra`; macOS prefers Vision OCR. FFmpeg/FFprobe only affects automatic video frame extraction.
 - `opencli` is the local adapter for Xiaohongshu, Ctrip and public WeChat articles. Only the configured 1.8.6 version whose entrypoint SHA-256, package-payload SHA-256 and complete resolved dependency-graph SHA-256 (including installed peer dependencies) match the product configuration, with no local code in `~/.opencli/clis` or `~/.opencli/plugins`, is accepted. Any added, replaced or missing direct, transitive or runtime-optional peer dependency makes the adapter untrusted. Signed Xiaohongshu URLs are passed to the local adapter bootstrap over standard input instead of appearing in its process arguments. The adapter may reuse an existing read-only local browser session, but the Skill never exports cookies, logs in for the user or bypasses CAPTCHA, WAF, login walls or robots restrictions.
 - Durable media requires private local permissions (POSIX directories `0700`, files `0600`; Windows removes inheritance, grants only the current user and verifies the resulting ACL). Durable writes keep a private same-directory rollback until the replacement is verified; cleanup retries, scrubs undeletable rollback contents and removes stale target-specific rollback files on a later write. Durable storage stops if permission enforcement or verification fails. Each platform download gets a fresh directory under the output asset tree; caller-supplied media directories are ignored. Customer HTML links require public HTTPS and reject embedded credentials, non-standard ports and local-only host suffixes.
@@ -87,4 +91,4 @@
 
 Official capability references: [TikTok Embed Videos](https://developers.tiktok.com/doc/embed-videos/), [Meta Embeds for WordPress](https://github.com/facebook/meta-embeds-for-wordpress), [YouTube Data API authorization boundary](https://developers.google.com/youtube/v3/docs), and [Douyin video-data authorization boundary](https://open.douyin.com/platform/resource/docs/ability/open-data/video-data-solution).
 
-Access levels and source capabilities describe only what was actually observed. They cannot prove future opening status, booking inventory, queues, weather, accessibility or the authority of instructions embedded in external content. Real Windows runner validation requires separate remote-upload authorization.
+Access levels and source capabilities describe only what was actually observed. They cannot prove future opening status, booking inventory, queues, weather, accessibility or the authority of instructions embedded in external content. The repository CI also runs the Windows installation checker. Optional OCR may be unavailable as long as the core runtime is ready.

@@ -2,6 +2,7 @@
 """Convert a lightweight itinerary and render it with the shared passport template."""
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -87,6 +88,28 @@ def report_from_lightweight(data):
     }
 
 
+def title_day_count(title):
+    if not isinstance(title, str):
+        return None
+    zh = re.search(r"(?<![0-9零〇一二两三四五六七八九十])([0-9]+|[零〇一二两三四五六七八九十]+)\s*(?:日游|天(?:游|行程)?|日行程)", title)
+    if zh:
+        value = zh[1].replace("两", "二").replace("〇", "零")
+        if value.isascii() and value.isdecimal():
+            return int(value)
+        digits = {digit: i for i, digit in enumerate("零一二三四五六七八九")}
+        if value in digits:
+            return digits[value]
+        if value.count("十") == 1:
+            left, right = value.split("十")
+            if (not left or left in digits) and (not right or right in digits):
+                return digits.get(left, 1) * 10 + digits.get(right, 0)
+    words = ("zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten")
+    en = re.search(r"\b(\d+|" + "|".join(words) + r")(?:\s*[-–]\s*day\b|\s+days?\b)", title, re.I)
+    if en:
+        return int(en[1]) if en[1].isdecimal() else words.index(en[1].lower())
+    return None
+
+
 def main():
     if len(sys.argv) != 3:
         raise ValueError("用法 / Usage: python3 render.py input.json output.html")
@@ -95,7 +118,8 @@ def main():
         raise ValueError("Output must be an HTML file")
     if source.resolve() == target.resolve():
         raise ValueError("输入和输出不能是同一文件 / Input and output must differ.")
-    report = report_from_lightweight(json.loads(source.read_text(encoding="utf-8")))
+    data = json.loads(source.read_text(encoding="utf-8"))
+    report = report_from_lightweight(data)
     serialized = json.dumps(report, ensure_ascii=False)
     issues = text_scan_issues(serialized, "customer")
     if issues:
@@ -115,6 +139,13 @@ def main():
         if issues:
             raise ValueError("customer scan failed: " + ", ".join(issues))
         os.replace(rendered, target)
+    title_count = title_day_count(data.get("title"))
+    if title_count is not None and "days" in data and title_count != len(data["days"]):
+        actual = len(data["days"])
+        if report["locale"] == "en-US":
+            print(f"Warning: the title says {title_count} days, but the itinerary contains {actual}.", file=sys.stderr)
+        else:
+            print(f"提醒：标题写了 {title_count} 天，行程里有 {actual} 天。", file=sys.stderr)
     print(f"Created: {target}" if report["locale"] == "en-US" else f"已生成：{target}")
 
 

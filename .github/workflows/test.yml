@@ -7,7 +7,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest, ubuntu-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.9", "3.12"]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     env:
@@ -17,16 +18,16 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: "22"
+          node-version: "20"
       - run: python -m pip install Pillow==11.3.0
       - name: Run the Windows installation checker
         if: runner.os == 'Windows'
         shell: powershell
         run: |
-          $reportText = & .\skills\want-to-go-trip-planner\scripts\doctor_windows.ps1 -Locale zh-CN
+          $reportText = & .\want-to-go-trip-planner\scripts\doctor_windows.ps1 -Locale zh-CN
           if ($LASTEXITCODE -ne 0) { throw "Windows checker exited with code $LASTEXITCODE" }
           $doctor = ($reportText -join [Environment]::NewLine) | ConvertFrom-Json
           if ($doctor.platform.name -ne "Windows" -or -not $doctor.coreReady) {
@@ -34,5 +35,6 @@ jobs:
           }
           Write-Output ("Windows checker status: " + $doctor.status)
       - run: python -m unittest discover -s tests
-      - run: python skills/want-to-go-trip-planner/scripts/build_release.py --verify --zip dist/want-to-go-trip-planner-skill-3.2.0.zip
-      - run: python skills/want-to-go-trip-planner/scripts/want_to_go.py scan --path dist/want-to-go-trip-planner-skill-3.2.0.zip --mode package
+      - run: python want-to-go-trip-planner/scripts/build_release.py --zip dist/want-to-go-trip-planner-skill-3.2.1.zip
+      - run: git diff --exit-code -- want-to-go-trip-planner/release-manifest.json
+      - run: python want-to-go-trip-planner/scripts/want_to_go.py scan --path dist/want-to-go-trip-planner-skill-3.2.1.zip --mode package

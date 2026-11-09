@@ -1333,7 +1333,7 @@ def customer_place(
         hours = PUBLIC_SPACE_HOURS_EN if locale.startswith("en") else PUBLIC_SPACE_HOURS_ZH
 
     verification = customer_verification_summary(place, locale)
-    if hours and any(item["status"] == "stale" and item.get("field") in {"openingHours", "openingHoursText", "openingStatus"}
+    if hours and verification["status"] != "stale" and any(item["status"] == "stale" and item.get("field") in {"openingHours", "openingHoursText", "openingStatus"}
                      for item in verification["items"]):
         suffix = "Last recorded; recheck before visiting" if locale.startswith("en") else "历史记录，出发前复核"
         hours = f"{hours} ({suffix})"

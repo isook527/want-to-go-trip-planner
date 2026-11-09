@@ -8,7 +8,7 @@
       "id": "tea-museum-shot",
       "group": "tea-museum",
       "type": "screenshot",
-      "path": "examples/hangzhou/tea-museum.webp",
+      "path": "tests/fixtures/hangzhou/tea-museum.webp",
       "destination": "杭州",
       "name": "中国茶叶博物馆 · 双峰馆区"
     }

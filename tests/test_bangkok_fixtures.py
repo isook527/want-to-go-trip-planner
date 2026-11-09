@@ -9,10 +9,12 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from datetime import datetime, timedelta
+from xml.etree import ElementTree
 
 ROOT = Path(__file__).resolve().parents[1]
-SKILL = ROOT / "skills" / "want-to-go-trip-planner"
-FIXTURES = ROOT / "tests" / "fixtures"
+SKILL = ROOT / "want-to-go-trip-planner"
+FIXTURES = ROOT / "examples" / "bangkok"
 
 
 class BangkokFixtureTests(unittest.TestCase):
@@ -43,12 +45,9 @@ class BangkokFixtureTests(unittest.TestCase):
         return self.wtg("scan", "--path", html, "--mode", "customer", check=check)
 
     def test_old_html_is_blocked_and_new_labels_are_clean_in_both_locales(self):
-        with zipfile.ZipFile(ROOT / "dist" / "want-to-go-trip-planner-skill-3.1.0.zip") as package:
-            package.extractall(self.work / "baseline")
-        old = self.passport("zh-CN", "old", skill=self.work / "baseline" / "want-to-go-trip-planner")
-        baseline = old.read_text(encoding="utf-8")
-        self.assertIn("future_queue", baseline)
-        self.assertRegex(baseline, r"2026-08-09T00:00:00Z")
+        old = self.work / "old.html"
+        baseline = "<!doctype html><p>future_queue</p><p>2026-08-09T00:00:00Z</p>"
+        old.write_text(baseline, encoding="utf-8")
         self.assertNotEqual(self.scan(old, check=False).returncode, 0)
 
         sys.path.insert(0, str(SKILL / "scripts"))
@@ -62,6 +61,8 @@ class BangkokFixtureTests(unittest.TestCase):
                 path = self.passport(locale, locale)
                 html = path.read_text(encoding="utf-8")
                 self.assertNotIn("future_queue", html)
+                self.assertNotIn("未分片区", html)
+                self.assertNotIn("历史记录，出发前复核", html)
                 self.assertNotRegex(html, r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}")
                 self.assertIn(label, html)
                 self.assertEqual(html.count('<details class="verification'), 1)
@@ -91,13 +92,19 @@ class BangkokFixtureTests(unittest.TestCase):
                 evidence = self.passport(locale, "evidence").read_text(encoding="utf-8")
                 data = json.loads((FIXTURES / "bangkok-lightweight.json").read_text(encoding="utf-8"))
                 data["locale"] = locale
+                if locale == "en-US":
+                    data["title"] = "Bangkok three-day trip"
                 source, target = self.work / "lightweight.json", self.work / "lightweight.html"
                 source.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-                self.run_cli(sys.executable, SKILL / "scripts" / "render.py", source, target)
+                result = self.run_cli(sys.executable, SKILL / "scripts" / "render.py", source, target)
+                self.assertIn("标题写了 3 天" if locale == "zh-CN" else "title says 3 days", result.stderr)
                 rendered = target.read_text(encoding="utf-8")
                 self.assertEqual(re.search(r"<style>(.*?)</style>", evidence, re.S)[1],
                                  re.search(r"<style>(.*?)</style>", rendered, re.S)[1])
                 self.assertIn('class="day-activity"', rendered)
+                self.assertIn('<span>DAY 02</span></a>', rendered)
+                self.assertNotIn('aria-labelledby="manifest-title"', rendered)
+                self.assertNotIn("0 个片区" if locale == "zh-CN" else "0 areas", rendered)
                 self.assertEqual(rendered.count('class="card"'), 3)
                 self.assertEqual(rendered.count("www.google.com/maps/search"), 3)
                 self.assertNotIn('<img ', rendered)
@@ -108,6 +115,31 @@ class BangkokFixtureTests(unittest.TestCase):
                 self.run_cli(sys.executable, SKILL / "scripts" / "render.py", source, target)
                 self.assertNotIn('class="journey-plan"', target.read_text(encoding="utf-8"))
                 self.scan(target)
+
+    def test_bangkok_calendar_and_spreadsheet_use_the_expected_dates(self):
+        plan = json.loads(self.route.read_text(encoding="utf-8"))
+        plan["tripProfile"]["startDate"] = "2030-05-10"
+        self.route = self.work / "dated-route.json"
+        self.route.write_text(json.dumps(plan), encoding="utf-8")
+        self.passport("zh-CN", "dated")
+        xlsx, ics = self.work / "dated.xlsx", self.work / "dated.ics"
+        self.run_cli(sys.executable, SKILL / "scripts" / "export_itinerary.py",
+                     self.work / "dated.json", "--xlsx", xlsx, "--ics", ics)
+        with zipfile.ZipFile(xlsx) as workbook:
+            self.assertIsNone(workbook.testzip())
+            for member in workbook.namelist():
+                ElementTree.fromstring(workbook.read(member))
+        calendar = ics.read_bytes().replace(b"\r\n ", b"").decode("utf-8")
+        self.assertTrue(calendar.startswith("BEGIN:VCALENDAR\r\n"))
+        self.assertTrue(calendar.endswith("END:VCALENDAR\r\n"))
+        events = re.findall(r"BEGIN:VEVENT\r\n(.*?)END:VEVENT", calendar, re.S)
+        self.assertEqual(len(events), 2)
+        for index, event in enumerate(events):
+            fields = dict(line.split(":", 1) for line in event.splitlines() if ":" in line)
+            start = datetime.strptime(fields["DTSTART;VALUE=DATE"], "%Y%m%d")
+            end = datetime.strptime(fields["DTEND;VALUE=DATE"], "%Y%m%d")
+            self.assertEqual(start, datetime(2030, 5, 10) + timedelta(days=index))
+            self.assertEqual(end - start, timedelta(days=1))
 
     def lint(self, locale="zh-CN"):
         return json.loads(self.wtg("lint-route", "--library", self.library, "--destination", "曼谷",

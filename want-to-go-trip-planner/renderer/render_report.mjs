@@ -323,13 +323,27 @@ function publicAreas(places, destination) {
   return {groups: [...groups.values()], unknown};
 }
 
+function dayNavTitle(value, number) {
+  const title = clean(value, 140);
+  const english = /^day\s+0*(\d+)$/i.exec(title);
+  const numericZh = /^第\s*0*(\d+)\s*天$/.exec(title);
+  const digits = "零一二三四五六七八九";
+  const units = number % 10;
+  const tens = Math.floor(number / 10);
+  const zhNumber = tens ? `${tens === 1 ? "" : digits[tens]}十${units ? digits[units] : ""}` : digits[units];
+  return Number(english?.[1] || numericZh?.[1]) === number
+    || title.replace(/\s+/g, "") === `第${zhNumber}天` ? "" : title;
+}
+
 function routePlanSection(plan, en) {
   if (!plan || !Array.isArray(plan.days) || !plan.days.length) return "";
   const days = plan.days;
   const dayId = (index) => `day-${String(index + 1).padStart(2, "0")}`;
-  const dayNav = days.map((day, index) =>
-    `<a href="#${dayId(index)}"><span>DAY ${String(day.day || index + 1).padStart(2, "0")}</span>${day.title ? ` · ${escapeHtml(clean(day.title, 140))}` : ""}</a>`
-  ).join("");
+  const dayNav = days.map((day, index) => {
+    const number = Number(day.day) || index + 1;
+    const title = dayNavTitle(day.title, number);
+    return `<a href="#${dayId(index)}"><span>DAY ${String(number).padStart(2, "0")}</span>${title ? ` · ${escapeHtml(title)}` : ""}</a>`;
+  }).join("");
   const noteLabels = en
     ? {lunch: "Lunch", rest: "Rest", backup: "Backup", dropIfDelayed: "Skip if delayed", tradeoff: "Trade-off"}
     : {lunch: "午餐", rest: "休息", backup: "备选", dropIfDelayed: "超时则跳过", tradeoff: "取舍"};
@@ -423,7 +437,7 @@ function render(report, inputPath) {
   const brief = [
     dayCount ? (en ? `${dayCount} ${dayCount === 1 ? "day" : "days"}` : `${dayCount} 天`) : "",
     en ? `${places.length} ${places.length === 1 ? "place" : "places"}` : `${places.length} 个地点`,
-    en ? `${areaCount} ${areaCount === 1 ? "area" : "areas"}` : `${areaCount} 个片区`,
+    areaCount ? (en ? `${areaCount} ${areaCount === 1 ? "area" : "areas"}` : `${areaCount} 个片区`) : "",
     dateRange,
   ].filter(Boolean).join(" · ");
   const html = `<!doctype html><html lang="${en ? "en" : "zh-CN"}"><head><meta charset="utf-8">
@@ -437,7 +451,7 @@ function render(report, inputPath) {
         <div class="hero-meta" aria-label="${en ? "Passport summary" : "护照摘要"}">
           <div><span>${en ? "DAYS" : "行程天数"}</span><strong>${dayCount || "—"}</strong></div>
           <div><span>${en ? "PLACES" : "地点"}</span><strong>${places.length}</strong></div>
-          <div><span>${en ? "AREAS" : "片区"}</span><strong>${areaCount}</strong></div>
+          ${areaCount ? `<div><span>${en ? "AREAS" : "片区"}</span><strong>${areaCount}</strong></div>` : ""}
         </div>
         <p class="hero-summary">${escapeHtml(brief)}</p>
       </div>
@@ -448,7 +462,7 @@ function render(report, inputPath) {
       </aside>
     </header>
     ${routePlanSection(report.routePlan, en)}
-    <section class="manifest" aria-labelledby="manifest-title">
+    ${areaCount ? `<section class="manifest" aria-labelledby="manifest-title">
       <div class="manifest-copy"><p class="kicker">TRIP MANIFEST</p>
         <h2 id="manifest-title">${en ? "A want-to-go itinerary you can take with you" : "一张能带走的想去行程单"}</h2>
         <p>${en ? "Places stay grouped by area, with display images, addresses, reminders and only the source links you actually submitted." : "地点按片区整理，保留展示配图、地址和出发提醒；只有你实际提交过的原始链接才会显示。"}</p>
@@ -456,7 +470,7 @@ function render(report, inputPath) {
       ${areas.length ? `<div class="area-route" aria-label="${en ? "Area summary" : "片区摘要"}">${areas.slice(0, 8).map(([area, count], index) => `
         <div class="route-stop"><span class="stop-number">${String(index + 1).padStart(2, "0")}</span><span class="route-name">${escapeHtml(area)}</span><span class="route-count">${count} ${en ? (count === 1 ? "PLACE" : "PLACES") : "个地点"}</span></div>`).join("")}
       </div>` : ""}
-    </section>
+    </section>` : ""}
     <section class="grid">${places.map((place) => card(place, locale, baseDir, report.mapRegion, destination)).join("")}</section>
     ${riskPanel(report.tripRisks, en, "trip-risks")}
     ${retained ? `<aside class="retained">${en

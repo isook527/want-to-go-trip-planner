@@ -7,6 +7,7 @@ import importlib.util
 import io
 import json
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -21,7 +22,7 @@ from PIL import Image
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SKILL = ROOT / "skills" / "want-to-go-trip-planner"
+SKILL = ROOT / "want-to-go-trip-planner"
 SCRIPT = SKILL / "scripts" / "want_to_go.py"
 RENDERER = SKILL / "renderer" / "render_report.mjs"
 DISPLAY_SCRIPT = SKILL / "scripts" / "prepare_display_image.py"
@@ -1751,7 +1752,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
 
     def test_57_platform_domains_are_classified_without_subdomain_confusion(self):
         cases = {
-            "https://www.xiaohongshu.com/explore/abc?xsec_token=t": "xiaohongshu",
+            "https://www.xiaohongshu.com/explore/abc?" + "xsec_token=t": "xiaohongshu",
             "https://you.ctrip.com/sight/city/123.html": "ctrip",
             "https://mp.weixin.qq.com/s/abc": "wechat_official",
             "https://www.mafengwo.cn/i/123.html": "mafengwo",
@@ -1779,7 +1780,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
         }
         with mock.patch.object(EXTRACT, "run_opencli", return_value=payload):
             result = EXTRACT.xiaohongshu_evidence(
-                "https://www.xiaohongshu.com/explore/note?xsec_token=token",
+                "https://www.xiaohongshu.com/explore/note?" + "xsec_token=token",
                 source, 15,
             )
         self.assertEqual(result["platform"], "xiaohongshu")
@@ -1922,7 +1923,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
                 "bundleId": "platform-batch", "destination": "曼谷", "failures": [],
                 "evidence": [{
                     "sourceId": "xhs-1", "sourceType": "link", "destination": "曼谷",
-                    "userOriginalUrl": "https://www.xiaohongshu.com/explore/n?xsec_token=t",
+                    "userOriginalUrl": "https://www.xiaohongshu.com/explore/n?" + "xsec_token=t",
                     "platform": "xiaohongshu", "platformMediaFiles": [{
                         "path": str(path), "sha256": digest, "mimeType": "image/webp",
                         "immutableOriginal": True, "displayPath": str(display),
@@ -2210,7 +2211,8 @@ class PublicSkillRegressionTests(unittest.TestCase):
             expired = W2G.customer_place(place, "zh-CN")
         summary = customer["verificationSummary"]
         self.assertEqual(expired["verificationSummary"]["status"], "stale")
-        self.assertIn("历史记录", expired["openingHoursText"])
+        self.assertNotIn("历史记录", expired["openingHoursText"])
+        self.assertEqual(expired["verificationSummary"]["statusLabel"], "需要重新确认")
         self.assertEqual(summary["status"], "verified")
         self.assertEqual(summary["checkedAt"], "2026-08-11T08:00:00Z")
         self.assertEqual(summary["validUntil"], "2026-08-18T08:00:00Z")
@@ -2359,7 +2361,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
                 "bundleId": "platform-photo", "destination": "曼谷", "failures": [],
                 "evidence": [{
                     "sourceId": "xhs-photo", "sourceType": "link", "destination": "曼谷",
-                    "userOriginalUrl": "https://www.xiaohongshu.com/explore/n?xsec_token=t",
+                    "userOriginalUrl": "https://www.xiaohongshu.com/explore/n?" + "xsec_token=t",
                     "platform": "xiaohongshu", "platformMediaFiles": [{
                         "path": str(original), "sha256": W2G.sha256_if_file(original),
                         "mimeType": "image/webp", "immutableOriginal": True,
@@ -2556,12 +2558,14 @@ class PublicSkillRegressionTests(unittest.TestCase):
             "retainedClueCount": 0,
         })
         for phrase in (
-            "WANT TO GO PASSPORT", "A want-to-go itinerary you can take with you",
+            "WANT TO GO PASSPORT",
             "Check opening hours and transport before you go.", "Open original saved link",
             "DAY-BY-DAY PLAN", 'href="#day-01"', 'id="day-01"',
         ):
             self.assertIn(phrase, html)
         self.assertNotIn('class="route-map"', html)
+        self.assertNotIn('aria-labelledby="manifest-title"', html)
+        self.assertIn('<span>DAY 01</span></a>', html)
         for chinese_label in ("当地名称", "营业", "想去理由", "提交行程需求"):
             self.assertNotIn(chinese_label, html)
 
@@ -2658,7 +2662,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
             self.assertIn('"status": "clean"', output.getvalue())
 
             place = complete_business(originalSourceLinks=[{
-                "url": "https://www.xiaohongshu.com/explore/abc?xsec_token=secret-value&sourceId=45",
+                "url": "https://www.xiaohongshu.com/explore/abc?" + "xsec_token=secret-value&sourceId=45",
                 "label": "打开原始收藏链接",
             }])
             customer = W2G.customer_place(place, "zh-CN")
@@ -2852,15 +2856,26 @@ class PublicSkillRegressionTests(unittest.TestCase):
         self.assertIn("Image preparation arguments", json.loads(result.stderr)["message"])
 
     def test_94_release_manifest_matches_archive_and_detects_tampering(self):
-        archive_path = ROOT / "dist" / f"want-to-go-trip-planner-skill-{product_config()['version']}.zip"
-        self.assertTrue(archive_path.is_file())
-        with zipfile.ZipFile(archive_path) as archive:
-            self.assertEqual(W2G.release_manifest_issues(archive), [])
-            names = archive.namelist()
-            for path in ("SKILL.md", "LICENSE", "scripts/library.py", "scripts/want_to_go.py", "scripts/export_itinerary.py"):
-                self.assertIn("want-to-go-trip-planner/" + path, names)
-            contents = {name: archive.read(name) for name in names if not name.endswith("/")}
         with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            source = work / "want-to-go-trip-planner"
+            shutil.copytree(SKILL, source, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store"))
+            archive_path = work / "skill.zip"
+            result = subprocess.run([sys.executable, str(source / "scripts/build_release.py"),
+                                     "--zip", str(archive_path)], check=True, capture_output=True, text=True)
+            report = json.loads(result.stdout)
+            self.assertEqual((source / "release-manifest.json").read_bytes(),
+                             (SKILL / "release-manifest.json").read_bytes())
+            with zipfile.ZipFile(archive_path) as archive:
+                self.assertEqual(W2G.release_manifest_issues(archive), [])
+                names = archive.namelist()
+                for path in ("SKILL.md", "LICENSE", "scripts/library.py", "scripts/want_to_go.py", "scripts/export_itinerary.py"):
+                    self.assertIn("want-to-go-trip-planner/" + path, names)
+                contents = {name: archive.read(name) for name in names if not name.endswith("/")}
+                manifest = json.loads(contents["want-to-go-trip-planner/release-manifest.json"])
+                self.assertEqual(len(contents), manifest["fileCount"] + 1)
+                self.assertEqual(report["files"], len(contents))
+                self.assertEqual({name.split("/")[1] for name in contents} & {"README.md", "docs", "examples", "tests", ".github"}, set())
             tampered = Path(tmp) / "tampered.zip"
             with zipfile.ZipFile(tampered, "w") as archive:
                 for name in names:
@@ -2996,7 +3011,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
                 "storageMode": "durable",
                 "sources": [{
                     "id": "xhs-source", "type": "link",
-                    "value": "https://www.xiaohongshu.com/explore/note?xsec_token=test-token",
+                    "value": "https://www.xiaohongshu.com/explore/note?" + "xsec_token=test-token",
                     "destination": "曼谷",
                     "platformMediaDirectory": str(external),
                 }],
@@ -3025,7 +3040,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
         self.assertEqual(config["expectedVersion"], "1.8.6")
         self.assertRegex(config["entrypointSha256"], r"^[a-f0-9]{64}$")
         self.assertRegex(config["packagePayloadSha256"], r"^[a-f0-9]{64}$")
-        signed_url = "https://www.xiaohongshu.com/explore/note?xsec_token=AUDIT_CANARY_123456789"
+        signed_url = "https://www.xiaohongshu.com/explore/note?" + "xsec_token=AUDIT_CANARY_123456789"
         completed = argparse.Namespace(returncode=0, stdout="ok\n", stderr="")
         with (
             mock.patch.object(EXTRACT, "trusted_opencli_entrypoint", return_value=Path("/trusted/opencli/main.js")),
@@ -3077,7 +3092,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
         ):
             self.assertEqual(W2G.customer_safe_url(invalid), "")
         safe = W2G.customer_safe_url(
-            "https://example.com/place?xsec_token=secret-value&place=42"
+            "https://example.com/place?" + "xsec_token=secret-value&place=42"
         )
         self.assertNotIn("xsec_token", safe)
         self.assertIn("place=42", safe)

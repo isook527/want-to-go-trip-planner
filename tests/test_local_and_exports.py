@@ -11,7 +11,7 @@ from xml.etree import ElementTree
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS = ROOT / "skills/want-to-go-trip-planner/scripts"
+SCRIPTS = ROOT / "want-to-go-trip-planner/scripts"
 
 
 class Links(HTMLParser):
@@ -78,7 +78,7 @@ class LocalSkillTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             work = Path(tmp)
             source, xlsx, ics = (work / item for item in ("passport.json", "itinerary.xlsx", "itinerary.ics"))
-            data = json.loads((ROOT / "examples/itinerary.en-US.json").read_text(encoding="utf-8"))
+            data = json.loads((ROOT / "tests/fixtures/itinerary.en-US.json").read_text(encoding="utf-8"))
             data["title"] = "東京旅行, " * 20
             data["trip_notes"]["budget"] = ["=1+1"]
             source.write_text(json.dumps(data), encoding="utf-8")

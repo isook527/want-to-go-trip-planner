@@ -2588,9 +2588,9 @@ def doctor_report(locale="zh-CN"):
         )
     if not opencli["ready"]:
         feature_warnings.append(
-            "缺少 opencli：小红书、携程和公众号链接仍会原样保留，但自动读取受限；请从受信来源安装后重新运行 doctor。"
+            "小红书、携程和公众号默认关闭自动读取：保留链接，并请用户补截图或文字。只有通过完整性检查的可选 opencli 才会启用自动读取。"
             if not is_english else
-            "opencli is unavailable: Xiaohongshu, Ctrip, and WeChat URLs are still preserved, but automatic reading is limited. Install it from a trusted source and rerun doctor."
+            "Automatic reading is off by default for Xiaohongshu, Ctrip, and WeChat. Keep their links and ask for screenshots or text. Only the optional, integrity-checked opencli adapter enables automatic reading."
         )
 
     return {
