@@ -26,11 +26,14 @@ class Links(HTMLParser):
 
 class LocalSkillTests(unittest.TestCase):
     def run_script(self, script, *args, check=True):
-        return subprocess.run(
+        result = subprocess.run(
             [sys.executable, str(SCRIPTS / script), *map(str, args)],
-            capture_output=True, text=True, encoding="utf-8", check=check,
+            capture_output=True, text=True, encoding="utf-8",
             env={**os.environ, "PYTHONUTF8": "1"},
         )
+        if check:
+            self.assertEqual(result.returncode, 0, f"{script}: {result.stderr.strip()}")
+        return result
 
     def test_capture_reopen_export_and_render_full_chinese_itinerary(self):
         with tempfile.TemporaryDirectory() as tmp:

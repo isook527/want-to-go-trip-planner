@@ -17,8 +17,30 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
+        if: matrix.python != '3.9' || runner.os == 'macOS'
         with:
           python-version: ${{ matrix.python }}
+      # Ubuntu 26.04 has no setup-python 3.9 build. Keep the Linux and Windows
+      # 3.9 jobs on the same patched CPython without changing the test suite.
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        if: matrix.python == '3.9' && runner.os != 'macOS'
+        with:
+          version: "0.13.7"
+          enable-cache: false
+      - name: Install CPython 3.9 on Ubuntu
+        if: matrix.python == '3.9' && runner.os == 'Linux'
+        shell: bash
+        run: |
+          uv venv --python 3.9.25 --managed-python --seed "$RUNNER_TEMP/wtg-python39"
+          echo "$RUNNER_TEMP/wtg-python39/bin" >> "$GITHUB_PATH"
+      - name: Install CPython 3.9 on Windows
+        if: matrix.python == '3.9' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $runtime = Join-Path $env:RUNNER_TEMP 'wtg-python39'
+          uv venv --python 3.9.25 --managed-python --seed $runtime
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          (Join-Path $runtime 'Scripts') | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: "20"

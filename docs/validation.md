@@ -12,4 +12,4 @@
 | XLSX / ICS | 两天日期为 2030-05-10 至 2030-05-11 | 工作簿可解包并解析 XML，ICS 能解析两条全天事件及其正确的起止日期。 |
 | 发布包 | 用当前 Skill 构建并校验 ZIP | 包内文件数量、哈希和 SHA-256 边车文件一致。仓库 README、示例、测试与 CI 不进入安装包。 |
 
-本地软件验收使用 macOS Apple Silicon、Python 3.9 和 Node.js 22。CI 使用 Ubuntu、macOS、Windows，分别搭配 Python 3.9 与 3.12 和 Node 20。[查看 GitHub Actions](https://github.com/isook527/want-to-go-trip-planner/actions/workflows/test.yml)
+本地软件验收使用 macOS Apple Silicon、Python 3.9 和 Node.js 22。CI 使用 Ubuntu、macOS、Windows，分别搭配 Python 3.9 与 3.12 和 Node 20。Ubuntu 26.04 缺少 setup-python 的 3.9 构建，Ubuntu 与 Windows 的 3.9 任务用 uv 固定 CPython 3.9.25。[查看 GitHub Actions](https://github.com/isook527/want-to-go-trip-planner/actions/workflows/test.yml)
