@@ -1,5 +1,7 @@
 # 想去就出发 · Want to Go
 
+> 仓库历史已于 2026 年 11 月重写。[已有克隆的同步方法](https://github.com/isook527/want-to-go-trip-planner/issues/5)
+
 把收藏的旅行截图、链接和视频变成能走通的逐日行程和地点护照。
 
 ![曼谷护照总览，左为手机，右为桌面](docs/images/bangkok-passport-overview.png)

@@ -1,5 +1,7 @@
 # Want to Go · 想去就出发
 
+> The repository history was rewritten in November 2026. [Sync an existing clone](https://github.com/isook527/want-to-go-trip-planner/issues/5).
+
 Turn saved travel screenshots, links and videos into a workable day-by-day trip and a place passport.
 
 ![Bangkok passport overview with phone on the left and desktop on the right](docs/images/bangkok-passport-overview.png)
