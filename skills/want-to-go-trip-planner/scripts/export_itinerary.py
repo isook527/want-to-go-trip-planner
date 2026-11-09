@@ -79,7 +79,21 @@ def make_calendar(data):
         ])
         events += 1
     if not events:
-        raise ValueError("Calendar export requires a confirmed date on at least one day")
+        chinese = data.get("locale") == "zh-CN"
+        if "routePlan" in data:
+            if not (data.get("routePlan") or {}).get("days"):
+                raise ValueError(
+                    "导出 ICS 前请用 route-plan 保存带日期的路线，再重新生成护照 JSON。"
+                    if chinese else "Save a dated route with route-plan and regenerate the passport JSON before exporting ICS."
+                )
+            raise ValueError(
+                "导出 ICS 需要在路线 JSON 的 tripProfile.startDate 填写 YYYY-MM-DD，再保存路线并重新生成护照。"
+                if chinese else "For ICS, set tripProfile.startDate (YYYY-MM-DD) in the route JSON, save the route and regenerate the passport."
+            )
+        raise ValueError(
+            "导出 ICS 需要在轻量行程 JSON 的 days[].date 填写至少一个 YYYY-MM-DD 日期。"
+            if chinese else "For ICS, set at least one days[].date (YYYY-MM-DD) in the lightweight itinerary JSON."
+        )
     return ("\r\n".join(fold(line) for line in [*lines, "END:VCALENDAR"]) + "\r\n").encode("utf-8")
 
 

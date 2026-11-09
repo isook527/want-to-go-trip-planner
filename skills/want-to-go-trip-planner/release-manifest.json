@@ -1,7 +1,7 @@
 {
   "schemaVersion": "kornvia-skill-release-manifest-1",
   "packageName": "want-to-go-trip-planner",
-  "packageVersion": "3.0.1",
+  "packageVersion": "3.0.2",
   "contractVersion": "2.4.0",
   "rootDirectory": "want-to-go-trip-planner",
   "fileCount": 26,
@@ -24,7 +24,7 @@
     {
       "path": "config/product.json",
       "size": 6420,
-      "sha256": "b94254a549bd5f24a6d4d855d3d857ed0c57c6c5f89d0d0402f12619219f1ecd"
+      "sha256": "11e2024cc3bc676ddef771f3b2d7858f5708cea87bb0b31f4244797f01c8fa22"
     },
     {
       "path": "references/evidence-workflow.md",
@@ -38,8 +38,8 @@
     },
     {
       "path": "references/planning-and-exports.md",
-      "size": 2595,
-      "sha256": "2e490094797897f75ae5491162dd122e370dc8fc0cb323c4ceccdefb42d65b9b"
+      "size": 3077,
+      "sha256": "850d23bc0ccbad15fb9f6545234106d69ca381cf745e2642f010ceb6da0d32a8"
     },
     {
       "path": "references/provider-support.md",
@@ -88,8 +88,8 @@
     },
     {
       "path": "scripts/export_itinerary.py",
-      "size": 8466,
-      "sha256": "20be1696489fed30d1d6d0d3a198efaa82f24299bfc0a195d98a39cfad09afd3"
+      "size": 9394,
+      "sha256": "90cea90a2d210f8d7baaffa75e1bb3b5dbabfcc2f03a96b59afc3f57b7cda0fe"
     },
     {
       "path": "scripts/extract_evidence.py",
@@ -128,8 +128,8 @@
     },
     {
       "path": "scripts/want_to_go.py",
-      "size": 174032,
-      "sha256": "45534d8dc238e78f271305bc59557ca928475de4efb56478606ea9365eb67f49"
+      "size": 175470,
+      "sha256": "b08b7d35647c9f18c82ed474758a42797de7e52956685858272efb4828f8b2af"
     },
     {
       "path": "scripts/windows_acl.py",

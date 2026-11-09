@@ -1,0 +1,13 @@
+{
+  "selections": [
+    {
+      "id": "tea-museum",
+      "destination": "杭州",
+      "verifiedName": "中国茶叶博物馆 · 双峰馆区",
+      "nameSource": "user_named",
+      "placeType": "venue",
+      "address": "杭州双峰馆区",
+      "sourceIds": ["tea-museum-shot"]
+    }
+  ]
+}

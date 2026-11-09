@@ -227,6 +227,9 @@ CLI_ERROR_MESSAGES = {
         "PLACE_NOT_FOUND": "没有找到指定地点或目的地，请核对 ID 和所属分库。",
         "OPERATION_CONFLICT": "操作状态或幂等标识冲突，请刷新当前库后使用新的操作标识重试。",
         "INVALID_INPUT": "输入内容不符合要求，请核对字段类型、允许值和必填项。",
+        "PASSPORT_MISSING_FIELDS": "地点资料缺项。请用 edit 补齐后重试。",
+        "PASSPORT_ROUTE_REQUIRED": "请先用 route-plan 保存逐日路线。只需要地点护照时，可以加 --places-only。",
+        "ROUTE_START_DATE_INVALID": "请把 tripProfile.startDate 填成有效的 YYYY-MM-DD 日期，例如 2030-05-10。",
         "ERROR": "操作未完成，请检查输入和当前库状态后重试。",
     },
     "en-US": {
@@ -238,6 +241,9 @@ CLI_ERROR_MESSAGES = {
         "PLACE_NOT_FOUND": "The requested place or destination was not found. Check its ID and destination library.",
         "OPERATION_CONFLICT": "The operation state or idempotency identifier conflicts with current data. Reload the library and retry with a new operation ID.",
         "INVALID_INPUT": "The input is invalid. Check field types, allowed values and required fields.",
+        "PASSPORT_MISSING_FIELDS": "Use edit to fill in the missing place fields, then try again.",
+        "PASSPORT_ROUTE_REQUIRED": "Save a day-by-day route with route-plan, or add --places-only to make a place passport.",
+        "ROUTE_START_DATE_INVALID": "Set tripProfile.startDate to a valid YYYY-MM-DD date, for example 2030-05-10.",
         "ERROR": "The operation did not complete. Check the input and current library state, then try again.",
     },
 }
@@ -270,10 +276,27 @@ def cli_error_code(error: BaseException) -> str:
     return "ERROR"
 
 
-def localized_cli_error(error: BaseException, locale: Any) -> dict[str, str]:
+class MissingPlaceFields(ValueError):
+    def __init__(self, places: list[dict[str, Any]], locale: str):
+        labels = MISSING_FIELD_LABELS_EN if normalized_locale(locale) == "en-US" else MISSING_FIELD_LABELS_ZH
+        self.fields = list(dict.fromkeys(field for item in places for field in item["missing"]))
+        details = " | ".join(
+            f"{item['name']} ({', '.join(labels[field] for field in item['missing'])})"
+            for item in places[:12]
+        )
+        super().__init__(details)
+
+
+def localized_cli_error(error: BaseException, locale: Any) -> dict[str, Any]:
     normalized = normalized_locale(locale)
-    code = cli_error_code(error)
     messages = CLI_ERROR_MESSAGES[normalized]
+    if isinstance(error, MissingPlaceFields):
+        code = "PASSPORT_MISSING_FIELDS"
+        labels = MISSING_FIELD_LABELS_EN if normalized == "en-US" else MISSING_FIELD_LABELS_ZH
+        details = ", ".join(f"{labels[field]} ({field})" for field in error.fields)
+        separator = " Missing: " if normalized == "en-US" else " 缺少："
+        return {"code": code, "message": messages[code] + separator + details, "missingFields": error.fields}
+    code = cli_error_code(error)
     return {"code": code, "message": messages.get(code, messages["ERROR"])}
 
 
@@ -1288,6 +1311,13 @@ def normalize_route_plan(
         if text(item.get("id")) and not passport_missing_fields(item)
     }
     if not ready_places:
+        missing_places = [
+            {"name": verified_name(place) or first(place, "name"), "missing": fields}
+            for place in destination_places
+            if (fields := passport_missing_fields(place))
+        ]
+        if missing_places:
+            raise MissingPlaceFields(missing_places, locale)
         raise ValueError("route plan needs at least one passport-ready place")
 
     profile_raw = raw.get("tripProfile") if isinstance(raw.get("tripProfile"), dict) else {}
@@ -1295,8 +1325,13 @@ def normalize_route_plan(
     if not 1 <= trip_days <= 30:
         raise ValueError("tripProfile.days must be between 1 and 30")
     start_date = text(profile_raw.get("startDate"))
-    if start_date and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", start_date):
-        raise ValueError("tripProfile.startDate must use YYYY-MM-DD")
+    if start_date:
+        try:
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", start_date):
+                raise ValueError
+            date.fromisoformat(start_date)
+        except ValueError:
+            raise ValueError("ROUTE_START_DATE_INVALID: tripProfile.startDate must be a valid YYYY-MM-DD date") from None
     party_size = int(profile_raw.get("partySize", 0) or 0)
     if party_size and not 1 <= party_size <= 99:
         raise ValueError("tripProfile.partySize must be between 1 and 99")
@@ -2469,12 +2504,6 @@ def command_passport(args: argparse.Namespace) -> None:
             ),
             None,
         )
-        if not active_route_plan and not bool(getattr(args, "places_only", False)):
-            if args.locale.startswith("en"):
-                raise ValueError(
-                    "A complete passport needs a route plan. Ask the trip-intake questions, save the day-by-day route, then generate the passport."
-                )
-            raise ValueError("完整护照需要路线方案；请先完成行程问诊并保存逐日路线，再生成护照。")
         snapshot_items = {
             text(item.get("placeId")): item
             for item in ((latest_snapshot or {}).get("items") or [])
@@ -2498,22 +2527,16 @@ def command_passport(args: argparse.Namespace) -> None:
                     customer_place(customer_input, args.locale, content_depth, media_by_id)
                 )
         if not delivered:
-            labels = MISSING_FIELD_LABELS_EN if args.locale.startswith("en") else MISSING_FIELD_LABELS_ZH
-            details = "; ".join(
-                f"{item['name']} ({', '.join(labels.get(field, field) for field in item['missing'])})"
-                for item in retained[:12]
+            if retained:
+                raise MissingPlaceFields(retained, args.locale)
+            message = (
+                f"No places were found for destination: {destination or 'unspecified'}"
+                if normalized_locale(args.locale) == "en-US"
+                else f"没有找到目的地为“{destination or '未指定'}”的地点"
             )
-            if args.locale.startswith("en"):
-                raise ValueError(
-                    f"No deliverable places. Add the missing fields: {details}"
-                    if details else
-                    f"No places were found for destination: {destination or 'unspecified'}"
-                )
-            raise ValueError(
-                f"没有可交付地点，请补全缺失字段：{details}"
-                if details else
-                f"没有找到目的地为“{destination or '未指定'}”的地点"
-            )
+            raise ValueError(f"PLACE_NOT_FOUND: {message}")
+        if not active_route_plan and not bool(getattr(args, "places_only", False)):
+            raise ValueError("PASSPORT_ROUTE_REQUIRED: save a route plan first")
         payload = {
             "schemaVersion": CONTRACT_VERSION,
             "locale": args.locale,

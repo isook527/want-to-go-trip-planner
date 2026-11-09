@@ -1,0 +1,19 @@
+{
+  "title": "杭州一日游 · 示例",
+  "tripProfile": {
+    "days": 1,
+    "startDate": "2030-05-10",
+    "partySize": 2,
+    "mustGoPlaceIds": ["tea-museum"]
+  },
+  "days": [
+    {
+      "day": 1,
+      "title": "茶文化与山色",
+      "stops": [
+        {"placeId": "tea-museum", "timeBlock": "afternoon", "note": "先核对预约再出发。"}
+      ]
+    }
+  ],
+  "unassigned": []
+}

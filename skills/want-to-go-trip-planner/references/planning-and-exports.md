@@ -13,6 +13,9 @@ Use the traveler’s saved and verified places first. Include city transitions, 
   python3 /absolute/path/to/skill/scripts/export_itinerary.py passport.json --xlsx itinerary.xlsx --ics itinerary.ics
   ```
 
-- For calendar output, set a verified ISO date (`YYYY-MM-DD`) on each day. Each dated day becomes an all-day entry; plans without dates can still produce HTML and XLSX. Evidence exports use a saved trip start date to derive day dates when available. Do not claim that the ICS automatically updates.
+- **ICS dates, evidence workflow**: Set `tripProfile.startDate` in the route JSON, using a confirmed date in `YYYY-MM-DD` format. Run `route-plan` and `passport` again before exporting. The exporter calculates the remaining dates from the start date. The saved route uses the trip profile rather than per-day date inputs.
+- **ICS dates, lightweight workflow**: Set a confirmed `days[].date` in `YYYY-MM-DD` format for every day you want on the calendar. Each dated day becomes an all-day event. Undated plans can still produce HTML and XLSX. The ICS is a snapshot.
+
+证据流程用路线 JSON 的 `tripProfile.startDate` 推算各天日期，例如 `2030-05-10`。补日期后先保存路线，再重新生成护照 JSON。轻量流程可在每天的 `days[].date` 填写日期。
 - The spreadsheet includes the itinerary, places, transfers and trip notes. You can supply optional `trip_notes` arrays for budget, lodging, reservations, backup plans and departure checklists; entries are plain text. The spreadsheet exports only selected travel fields and never adds raw evidence or private library records.
 - Deliver each format from the same approved travel JSON. When a plan changes, regenerate requested formats together and keep an earlier confirmed copy unless the user asks for replacement.

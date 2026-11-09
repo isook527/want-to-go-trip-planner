@@ -102,12 +102,18 @@ class LocalSkillTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             work = Path(tmp)
             source, xlsx, ics = (work / item for item in ("passport.json", "itinerary.xlsx", "itinerary.ics"))
-            source.write_text('{"places":[],"days":[{"title":"Day 1","visits":[]}]}', encoding="utf-8")
-            xlsx.write_bytes(b"previous export")
-            result = self.run_script("export_itinerary.py", source, "--xlsx", xlsx, "--ics", ics, check=False)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertEqual(xlsx.read_bytes(), b"previous export")
-            self.assertFalse(ics.exists())
+            for trip, expected_field in (
+                ({"days": [{"title": "Day 1", "visits": []}]}, "days[].date"),
+                ({"routePlan": {"tripProfile": {}, "days": [{"title": "Day 1", "stops": []}]}}, "tripProfile.startDate"),
+            ):
+                with self.subTest(expected_field=expected_field):
+                    source.write_text(json.dumps({"places": [], **trip}), encoding="utf-8")
+                    xlsx.write_bytes(b"previous export")
+                    result = self.run_script("export_itinerary.py", source, "--xlsx", xlsx, "--ics", ics, check=False)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(expected_field, result.stderr)
+                    self.assertEqual(xlsx.read_bytes(), b"previous export")
+                    self.assertFalse(ics.exists())
 
 
 if __name__ == "__main__":

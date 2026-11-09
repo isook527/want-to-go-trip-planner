@@ -448,7 +448,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             library_path = Path(tmp) / "library.json"
             output_path = Path(tmp) / "passport.json"
-            incomplete = complete_business(signature="", visitTip="", departureTip="")
+            incomplete = complete_business(signature="", visitTip="", departureTip="", openingHoursText="")
             library_path.write_text(
                 json.dumps(
                     {
@@ -470,6 +470,21 @@ class PublicSkillRegressionTests(unittest.TestCase):
                         places_only=True,
                     )
                 )
+
+            for locale in ("zh-CN", "en-US"):
+                result = subprocess.run(
+                    [sys.executable, str(SCRIPT), "passport", "--library", str(library_path),
+                     "--destination", "曼谷", "--output", str(output_path), "--places-only", "--locale", locale],
+                    capture_output=True, text=True,
+                )
+                self.assertEqual(result.returncode, 1)
+                error = json.loads(result.stderr)
+                self.assertEqual(error["code"], "PASSPORT_MISSING_FIELDS")
+                self.assertEqual(set(error["missingFields"]), {"signature", "visitTip", "openingHoursText"})
+                for field in error["missingFields"]:
+                    self.assertIn(field, error["message"])
+                self.assertNotIn("Mae Varee", result.stderr)
+                self.assertFalse(output_path.exists())
 
     def test_19_each_place_keeps_only_its_grouped_links_and_photo(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2825,7 +2840,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
         self.assertIn("Image preparation arguments", json.loads(result.stderr)["message"])
 
     def test_94_release_manifest_matches_archive_and_detects_tampering(self):
-        archive_path = ROOT / "dist" / "want-to-go-trip-planner-skill-3.0.1.zip"
+        archive_path = ROOT / "dist" / "want-to-go-trip-planner-skill-3.0.2.zip"
         self.assertTrue(archive_path.is_file())
         with zipfile.ZipFile(archive_path) as archive:
             self.assertEqual(W2G.release_manifest_issues(archive), [])
