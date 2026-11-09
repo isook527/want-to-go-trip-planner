@@ -336,7 +336,7 @@ function routePlanSection(plan, en) {
   const dayCards = days.map((day, index) => `<article class="day-card" id="${dayId(index)}">
     <header><span>DAY ${String(day.day || index + 1).padStart(2, "0")}</span><h3>${escapeHtml(clean(day.title, 140))}</h3></header>
     ${day.summary ? `<p class="day-summary">${escapeHtml(clean(day.summary, 420))}</p>` : ""}
-    <ol>${(day.stops || []).map((stop) => `<li><div><span>${escapeHtml(clean(stop.timeLabel, 60))}</span><strong>${escapeHtml(clean(stop.name, 120))}</strong></div>
+    <ol>${(day.stops || []).map((stop) => `<li${stop.type === "activity" ? ' class="day-activity"' : ""}><div><span>${escapeHtml(clean(stop.timeLabel, 60))}</span><strong>${escapeHtml(clean(stop.name, 120))}</strong></div>
       ${stop.address ? `<p>${escapeHtml(clean(stop.address, 220))}</p>` : ""}
       ${stop.note ? `<p>${escapeHtml(clean(stop.note, 320))}</p>` : ""}</li>`).join("")}</ol>
     ${Object.entries(noteLabels).some(([key]) => day[key]) ? `<dl>${Object.entries(noteLabels).filter(([key]) => day[key]).map(([key, label]) => `<dt>${label}</dt><dd>${escapeHtml(clean(day[key], 300))}</dd>`).join("")}</dl>` : ""}
@@ -359,7 +359,7 @@ function card(place, locale, baseDir, mapRegion, destination) {
     ([place.routeStart, ...(place.waypoints || []), place.routeEnd].filter(Boolean).join(" → ")),
   );
   const links = publicLinks(place);
-  const query = [place.displayName || place.name, place.branch, place.address || place.positionText, destination].filter(Boolean).join(" ");
+  const query = [place.displayName || place.name, place.branch, place.address || place.positionText, place.city || destination].filter(Boolean).join(" ");
   mapRegion = ["mainland", "outside_mainland", "unknown"].includes(place.mapRegion) ? place.mapRegion : mapRegion;
   const mapSearch = mapRegion === "mainland"
     ? `https://uri.amap.com/search?${new URLSearchParams({keyword: query})}`
@@ -472,7 +472,9 @@ function main() {
   const stat = fs.statSync(inputPath);
   if (!stat.isFile() || stat.size > MAX_INPUT_BYTES) throw new Error("invalid input");
   const report = JSON.parse(fs.readFileSync(inputPath, "utf8"));
-  if (!Array.isArray(report.places) || report.places.length === 0) throw new Error("no deliverable places");
+  if (!Array.isArray(report.places) || (!report.places.length && report.lightweight !== true)) {
+    throw new Error("no deliverable places");
+  }
   if (report.placesOnly !== true && (!Array.isArray(report.routePlan?.days) || report.routePlan.days.length === 0)) throw new Error("no route plan");
   const html = render(report, inputPath);
   assertSafeUrlAttributes(html);

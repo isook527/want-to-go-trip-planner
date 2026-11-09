@@ -67,12 +67,12 @@ class LocalSkillTests(unittest.TestCase):
             html = work / "passport.html"
             self.run_script("render.py", exported, html)
             page = html.read_text(encoding="utf-8")
-            self.assertIn("逐日安排", page)
+            self.assertIn("逐日行程", page)
             self.assertIn("午休", page)
             links = Links()
             links.feed(page)
-            self.assertEqual([url.hostname for url in links.urls], ["uri.amap.com", "www.google.com"])
-            self.assertEqual(parse_qs(links.urls[1].query)["query"], ["Example Museum London"])
+            self.assertEqual([url.hostname for url in links.urls if url.hostname], ["uri.amap.com", "www.google.com"])
+            self.assertEqual(parse_qs(next(url for url in links.urls if url.hostname == "www.google.com").query)["query"], ["Example Museum London"])
 
     def test_calendar_and_xlsx_are_readable_and_keep_user_text_inert(self):
         with tempfile.TemporaryDirectory() as tmp:
