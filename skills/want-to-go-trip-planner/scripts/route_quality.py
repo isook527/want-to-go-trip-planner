@@ -12,6 +12,29 @@ BLOCKS = {"morning": ("06:00", "12:00"), "midday": ("11:00", "14:00"),
           "afternoon": ("12:00", "18:00"), "evening": ("17:00", "24:00")}
 DAY_NOTES = ("lunch", "rest", "backup", "dropIfDelayed", "tradeoff")
 
+WARNING_LEVELS = ("blocking", "suggest", "info")
+WARNING_SEVERITY = {
+    "opening_hours_conflict": "blocking",
+    "invalid_opening_hours": "blocking",
+    "walking_over_limit": "blocking",
+    "daily_commute_over_limit": "blocking",
+    "reservation_unconfirmed": "suggest",
+    "too_many_major_stops": "suggest",
+    "long_transfer_needs_tradeoff": "suggest",
+    "distant_must_go_needs_tradeoff": "suggest",
+    "too_many_unverified_connections": "suggest",
+    "incomplete_commute_minutes": "suggest",
+    "day_spans_many_areas": "suggest",
+    "area_backtrack": "suggest",
+    "day_spread_wide": "suggest",
+    "missing_lunch": "info",
+    "missing_rest": "info",
+    "missing_backup": "info",
+    "missing_dropIfDelayed": "info",
+    "incomplete_walking_distance": "info",
+    "opening_check_needs_date": "info",
+}
+
 
 def normalize_area(value):
     if not isinstance(value, str) or len(value.strip()) > 80:
@@ -139,6 +162,66 @@ def connection_status(connection):
     return connection.get("status", "unverified")
 
 
+def coordinates(place):
+    lat, lng = place.get("lat"), place.get("lng")
+    if type(lat) not in (int, float) or type(lng) not in (int, float):
+        return None
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        return None
+    return math.radians(lat), math.radians(lng)
+
+
+def distance_km(first, second):
+    lat1, lng1 = first
+    lat2, lng2 = second
+    a = math.sin((lat2 - lat1) / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin((lng2 - lng1) / 2) ** 2
+    return 6371.0088 * 2 * math.asin(math.sqrt(min(1, a)))
+
+
+def geography_warnings(day, places, warn):
+    areas, located = [], []
+    for stop in day["stops"]:
+        place_id = stop["placeId"]
+        place = places.get(place_id, {})
+        area = place.get("area")
+        if isinstance(area, str) and (area := area.strip().casefold()) and (not areas or areas[-1] != area):
+            areas.append(area)
+        if point := coordinates(place):
+            located.append((place_id, point))
+    unique_count = len(set(areas))
+    if unique_count > 2:
+        warn("day_spans_many_areas", count=unique_count, limit=2)
+    if unique_count < len(areas):
+        warn("area_backtrack")
+    if day.get("tradeoff"):
+        return
+    farthest = max(
+        ((distance_km(first, second), a, b) for i, (a, first) in enumerate(located)
+         for b, second in located[i + 1:]),
+        default=(0, "", ""),
+    )
+    km, start, end = farthest
+    if km > 15 and not any(
+        leg.get("tradeoff") and {leg.get("fromPlaceId"), leg.get("toPlaceId")} == {start, end}
+        for leg in day["connections"]
+    ):
+        warn("day_spread_wide", distanceKm=round(km, 1), limitKm=15)
+
+
+def warning_summary(warnings):
+    groups = {}
+    for item in warnings:
+        code, severity, day = (item[key] for key in ("code", "severity", "day"))
+        group = groups.setdefault(code, {"code": code, "severity": severity, "days": set()})
+        group["days"].add(day)
+        if WARNING_LEVELS.index(severity) < WARNING_LEVELS.index(group["severity"]):
+            group["severity"] = severity
+    return [
+        {**group, "days": sorted(group["days"])}
+        for group in sorted(groups.values(), key=lambda group: (WARNING_LEVELS.index(group["severity"]), group["code"]))
+    ]
+
+
 def lint_route(plan, places):
     profile = plan["tripProfile"]
     reduced = profile.get("reducedMobility") or profile.get("pace", "").casefold() in {"slow", "relaxed", "慢", "轻松"}
@@ -153,8 +236,8 @@ def lint_route(plan, places):
         number = day["day"]
         weekday = WEEKDAYS[(start + timedelta(days=number - 1)).weekday()] if start else None
 
-        def warn(code, **details):
-            warnings.append({"code": code, "day": number, **details})
+        def warn(code, *, severity=None, **details):
+            warnings.append({"code": code, "day": number, "severity": severity or WARNING_SEVERITY[code], **details})
 
         stops, connections = day["stops"], day["connections"]
         major_stops = sum(stop.get("major", True) for stop in stops)
@@ -179,6 +262,7 @@ def lint_route(plan, places):
             )
             if needs_reservation and stop.get("reservationStatus") != "confirmed":
                 warn("reservation_unconfirmed", placeId=stop["placeId"],
+                     severity="blocking" if stop.get("reservationRequired") is True else None,
                      status=stop.get("reservationStatus", "unknown"))
         durations = [leg["durationMinutes"] for leg in connections if "durationMinutes" in leg]
         expected_pairs = {(a["placeId"], b["placeId"]) for a, b in zip(stops, stops[1:])}
@@ -214,6 +298,7 @@ def lint_route(plan, places):
                 warn("walking_over_limit", meters=walking, limit=walking_limit)
             if missing or any("distanceMeters" not in leg for leg in walk_legs) or "onsiteWalkingMeters" not in day:
                 warn("incomplete_walking_distance")
+        geography_warnings(day, places, warn)
         metrics.append({"day": number, "majorStops": major_stops, "knownCommuteMinutes": total,
                         "commuteComplete": not (missing or unknown), "knownWalkingMeters": walking})
-    return {"warnings": warnings, "metrics": metrics}
+    return {"warnings": warnings, "metrics": metrics, "summary": warning_summary(warnings)}

@@ -523,6 +523,16 @@
           "type": "string",
           "maxLength": 80
         },
+        "lat": {
+          "type": "number",
+          "minimum": -90,
+          "maximum": 90
+        },
+        "lng": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180
+        },
         "placeType": {
           "enum": [
             "business",

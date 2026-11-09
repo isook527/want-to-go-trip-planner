@@ -6,7 +6,19 @@ Use these thresholds when planning from saved places. They are defaults for trip
 python3 scripts/want_to_go.py lint-route --library want-to-go.json --destination 杭州 --plan route.json
 ```
 
-`lint-route` does not write to the library. `route-plan` returns the same warnings and metrics when it saves a new version. Review warnings before delivery and explain any accepted trade-offs.
+`lint-route` does not write to the library. `route-plan` returns the same warnings and metrics when it saves a new version. Use the grouped `summary` when reporting findings. The detailed `warnings` array still has one entry per finding. Each group contains its warning code, highest severity and affected day numbers.
+
+| Severity | What to do |
+| --- | --- |
+| `blocking` | Resolve before delivery. Examples include conflicting hours, an exceeded daily limit and an explicitly required reservation that is unconfirmed. |
+| `suggest` | Explain the trade-off to the traveler. Examples include a long transfer, an incomplete commute estimate and a geographically scattered day. |
+| `info` | Treat as a planning reminder. Missing optional notes, dates or walking measurements do not block delivery. |
+
+中文：交付前处理 `blocking`，向旅行者说明 `suggest` 的影响或取舍。`info` 只是补充资料的提示。相同问题在 `summary` 里按代码合并，列出受影响的天数。
+
+Geography checks use confirmed `area` values. They suggest a revision for three or more areas in one day or a return to an earlier area after visiting another. With valid `lat`/`lng` on at least two stops, the checker flags a maximum straight-line spread over 15 km when the day or the matching leg has no `tradeoff`. Unknown areas or coordinates are not inferred.
+
+地理检查只用已填的片区或有效坐标。单日超过两个片区、折返已去片区，或两点直线距离超过 15 公里且无取舍说明时，给出建议。
 
 | Check | Default and fields |
 | --- | --- |
