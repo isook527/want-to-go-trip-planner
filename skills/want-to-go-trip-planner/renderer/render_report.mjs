@@ -79,8 +79,10 @@ function clean(value, max = 260, field = "content") {
 }
 
 function assertSafeUrlAttributes(html) {
+  const dayIds = new Set([...html.matchAll(/\bid="(day-\d{2,})"/g)].map((match) => match[1]));
   for (const match of html.matchAll(/\b(href|src|action)="([^"]*)"/gi)) {
     const [raw, attribute, value] = match;
+    if (attribute.toLowerCase() === "href" && value.startsWith("#") && dayIds.has(value.slice(1))) continue;
     if (attribute.toLowerCase() === "src" && /^data:image\/(?:png|jpeg|webp);base64,/i.test(value)) continue;
     let parsed;
     try {
@@ -246,27 +248,39 @@ function atomicWriteFile(outputPath, content) {
 
 function verificationPanel(place, en) {
   const summary = place.verificationSummary || {};
-  const label = clean(summary.statusLabel, 80) || (en ? "Not manually reviewed" : "尚未人工复核");
-  const checkedAt = clean(summary.checkedAt, 40);
-  const validUntil = clean(summary.validUntil, 40);
+  const status = summary.status || "unverified";
   const sources = publicAuditLinks(summary.sources);
-  const pending = Array.isArray(summary.pending) ? summary.pending.map((item) => clean(item, 180)).filter(Boolean) : [];
+  if (status === "unverified" && !sources.length) {
+    return `<p class="verification-fallback">${en ? "Check opening hours and transport before you go." : "出发前确认营业与交通"}</p>`;
+  }
+  const tone = status === "verified" ? "positive" : ["conflict", "stale"].includes(status) ? "urgent" : "caution";
+  const label = clean(summary.statusLabel, 80) || (en ? "Check before you go" : "出发前再确认");
+  const primary = Array.isArray(summary.items) ? summary.items.find((item) => item.status === status) : null;
+  const topic = clean(primary?.label, 80);
+  const checkedAt = clean(summary.checkedAtLabel, 60);
+  const validUntil = clean(summary.validUntilLabel, 60);
+  const headline = en ? [topic, label, checkedAt].filter(Boolean).join(" · ")
+    : [topic + label, checkedAt].filter(Boolean).join(" · ");
+  const pending = Array.isArray(summary.pending)
+    ? summary.pending.map((item) => clean(item, 180)).filter((item) => item && !/^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/i.test(item))
+    : [];
   const actions = Array.isArray(summary.nextActions) ? summary.nextActions.map((item) => clean(item, 180)).filter(Boolean) : [];
-  return `<section class="verification" aria-label="${en ? "Verification status" : "核验状态"}">
-    <div class="verification-head"><strong>${en ? "Verification status" : "核验状态"}</strong><span>${escapeHtml(label)}</span></div>
-    ${checkedAt ? `<p><b>${en ? "Last checked" : "最近检查"}</b>${escapeHtml(checkedAt)}</p>` : ""}
-    ${validUntil ? `<p><b>${en ? "Valid until" : "适用期限"}</b>${escapeHtml(validUntil)}</p>` : ""}
-    ${sources.length ? `<div class="audit-sources"><b>${en ? "Public sources" : "公开来源"}</b>${sources.map((item) => `<a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.label)}</a>`).join("")}</div>` : ""}
-    ${pending.length ? `<div><b>${en ? "Still unproven" : "尚待确认"}</b><ul>${pending.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>` : ""}
-    ${actions.length ? `<div><b>${en ? "Before departure" : "出发前动作"}</b><ul>${actions.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>` : ""}
-  </section>`;
+  return `<details class="verification tone-${tone}">
+    <summary><span class="status-dot" aria-hidden="true"></span><span>${escapeHtml(headline)}</span></summary>
+    <div class="verification-body">
+      ${validUntil ? `<p>${escapeHtml(validUntil)}</p>` : ""}
+      ${sources.length ? `<div class="audit-sources"><b>${en ? "Sources" : "参考来源"}</b>${sources.map((item) => `<a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.label)}</a>`).join("")}</div>` : ""}
+      ${pending.length ? `<div><b>${en ? "What to check" : "出发前留意"}</b><ul>${pending.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>` : ""}
+      ${actions.length ? `<div><b>${en ? "Before you go" : "出发前准备"}</b><ul>${actions.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>` : ""}
+    </div>
+  </details>`;
 }
 
 function riskPanel(risks, en, className = "risk-list") {
   const safeRisks = Array.isArray(risks) ? risks : [];
   if (!safeRisks.length) return "";
-  return `<section class="${className}" aria-label="${en ? "Execution risks" : "执行风险"}">
-    <strong>${en ? "Execution risks" : "执行风险"}</strong>
+  return `<section class="${className}" aria-label="${en ? "Before you go" : "行前提醒"}">
+    <strong>${en ? "Before you go" : "行前提醒"}</strong>
     <div>${safeRisks.map((risk) => {
       const sources = publicAuditLinks(risk.sources);
       return `<article class="risk-item"><div><span>${escapeHtml(clean(risk.scopeLabel, 40))}</span><b>${escapeHtml(clean(risk.label, 80))}</b></div>
@@ -285,24 +299,21 @@ function publicAreas(places, en) {
       || (en ? "SAVED PLACES" : "未分片区");
     counts.set(label, (counts.get(label) || 0) + 1);
   }
-  return [...counts.entries()].slice(0, 8);
+  return [...counts.entries()];
 }
 
 function routePlanSection(plan, en) {
   if (!plan || !Array.isArray(plan.days) || !plan.days.length) return "";
   const days = plan.days;
-  const routeMap = days.map((day) => `<article class="map-day">
-    <div class="map-day-head"><span>DAY ${String(day.day || 0).padStart(2, "0")}</span><strong>${escapeHtml(clean(day.title, 140))}</strong></div>
-    <div class="map-line">${(day.stops || []).map((stop, index) => `<div class="map-stop">
-      <span class="map-dot">${String(index + 1).padStart(2, "0")}</span>
-      <span><b>${escapeHtml(clean(stop.name, 120))}</b><small>${escapeHtml(clean(stop.timeLabel, 60))}</small></span>
-    </div>`).join("")}</div>
-  </article>`).join("");
+  const dayId = (index) => `day-${String(index + 1).padStart(2, "0")}`;
+  const dayNav = days.map((day, index) =>
+    `<a href="#${dayId(index)}"><span>DAY ${String(day.day || index + 1).padStart(2, "0")}</span>${day.title ? ` · ${escapeHtml(clean(day.title, 140))}` : ""}</a>`
+  ).join("");
   const noteLabels = en
     ? {lunch: "Lunch", rest: "Rest", backup: "Backup", dropIfDelayed: "Skip if delayed", tradeoff: "Trade-off"}
     : {lunch: "午餐", rest: "休息", backup: "备选", dropIfDelayed: "超时则跳过", tradeoff: "取舍"};
-  const dayCards = days.map((day) => `<article class="day-card">
-    <header><span>DAY ${String(day.day || 0).padStart(2, "0")}</span><h3>${escapeHtml(clean(day.title, 140))}</h3></header>
+  const dayCards = days.map((day, index) => `<article class="day-card" id="${dayId(index)}">
+    <header><span>DAY ${String(day.day || index + 1).padStart(2, "0")}</span><h3>${escapeHtml(clean(day.title, 140))}</h3></header>
     ${day.summary ? `<p class="day-summary">${escapeHtml(clean(day.summary, 420))}</p>` : ""}
     <ol>${(day.stops || []).map((stop) => `<li><div><span>${escapeHtml(clean(stop.timeLabel, 60))}</span><strong>${escapeHtml(clean(stop.name, 120))}</strong></div>
       ${stop.address ? `<p>${escapeHtml(clean(stop.address, 220))}</p>` : ""}
@@ -312,9 +323,8 @@ function routePlanSection(plan, en) {
   </article>`).join("");
   const unassigned = Array.isArray(plan.unassigned) ? plan.unassigned : [];
   return `<section class="journey-plan" aria-labelledby="route-plan-title">
-    <div class="journey-heading"><div><p class="kicker">${en ? "DAY-BY-DAY PLAN" : "逐日行程"}</p><h2 id="route-plan-title">${escapeHtml(clean(plan.title, 180) || (en ? "Your day-by-day route" : "按天想去路线"))}</h2></div>
-      <div class="route-status"><strong>${escapeHtml(clean(plan.generationLabel, 120))}</strong><span>${escapeHtml(clean(plan.mapLabel, 120))}</span></div></div>
-    <div class="route-map" aria-label="${en ? "Schematic route map" : "示意路线图"}">${routeMap}</div>
+    <div class="journey-heading"><p class="kicker">${en ? "DAY-BY-DAY PLAN" : "逐日行程"}</p><h2 id="route-plan-title">${escapeHtml(clean(plan.title, 180) || (en ? "Your day-by-day route" : "按天想去路线"))}</h2></div>
+    <nav class="day-nav" aria-label="${en ? "Jump to day" : "跳到某天行程"}">${dayNav}</nav>
     <div class="day-grid">${dayCards}</div>
     ${unassigned.length ? `<aside class="unassigned"><strong>${en ? "Saved for another route" : "本轮未排入"}</strong><ul>${unassigned.map((item) => `<li>${escapeHtml(clean(item.name, 120))}${item.reason ? `：${escapeHtml(clean(item.reason, 220))}` : ""}</li>`).join("")}</ul></aside>` : ""}
     <p class="route-boundary">${escapeHtml(clean(plan.boundary, 420))}</p>
@@ -353,13 +363,26 @@ function card(place, locale, baseDir, mapRegion, destination) {
       </dl>
       ${route ? `<div class="route"><strong>${en ? "Route" : "路线"}</strong><br>${escapeHtml(route)}</div>` : ""}
       ${mapSearch ? `<p><a class="button" href="${escapeHtml(mapSearch)}" target="_blank" rel="noopener noreferrer">${mapRegion === "mainland" ? (en ? "Search Amap" : "高德地图搜索") : (en ? "Search Google Maps" : "Google 地图搜索")}</a></p>` : ""}
-      ${verificationPanel(place, en)}
       ${riskPanel(place.executionRisks, en)}
       ${links.length ? `<div class="sources">${links.map((url) =>
         `<a class="button" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${en ? "Open original saved link" : "打开原始收藏链接"}</a>`
       ).join("")}</div>` : ""}
+      ${verificationPanel(place, en)}
     </div>
   </article>`;
+}
+
+function tripDateRange(plan, dayCount, locale) {
+  const value = plan?.tripProfile?.startDate;
+  if (!dayCount || !/^\d{4}-\d{2}-\d{2}$/.test(value || "")) return "";
+  const start = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(start.getTime()) || start.toISOString().slice(0, 10) !== value) return "";
+  const end = new Date(start.getTime() + (dayCount - 1) * 86_400_000);
+  const format = new Intl.DateTimeFormat(locale, {
+    month: "short", day: "numeric", timeZone: "UTC",
+    ...(start.getUTCFullYear() === end.getUTCFullYear() ? {} : {year: "numeric"}),
+  });
+  return dayCount === 1 ? format.format(start) : format.formatRange(start, end);
 }
 
 function render(report, inputPath) {
@@ -369,44 +392,48 @@ function render(report, inputPath) {
   const places = Array.isArray(report.places) ? report.places : [];
   const retained = Math.max(0, Number(report.retainedClueCount || 0));
   const destination = clean(report.destination, 80) || (en ? "MY TRIP" : "我的旅程");
-  const sourceLinkCount = places.reduce((sum, place) => sum + publicLinks(place).length, 0);
   const areas = publicAreas(places, en);
+  const areaCount = areas.filter(([label]) => label !== (en ? "SAVED PLACES" : "未分片区")).length;
   const baseDir = path.dirname(inputPath);
   const dayCount = Array.isArray(report.routePlan?.days) ? report.routePlan.days.length : 0;
+  const dateRange = tripDateRange(report.routePlan, dayCount, locale);
+  const brief = [
+    dayCount ? (en ? `${dayCount} ${dayCount === 1 ? "day" : "days"}` : `${dayCount} 天`) : "",
+    en ? `${places.length} ${places.length === 1 ? "place" : "places"}` : `${places.length} 个地点`,
+    en ? `${areaCount} ${areaCount === 1 ? "area" : "areas"}` : `${areaCount} 个片区`,
+    dateRange,
+  ].filter(Boolean).join(" · ");
   const html = `<!doctype html><html lang="${en ? "en" : "zh-CN"}"><head><meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title>
   <style>${KORNVIA_REPORT_CSS}</style></head><body><main class="shell">
     <header class="hero ticket">
       <div class="hero-main">
         <div class="brand-row"><strong class="wordmark">Kornvia</strong><span>WANT TO GO PASS</span></div>
-        <div class="hero-title"><p class="kicker">${en ? "DESTINATION LIBRARY" : "目的地分库"}</p><h1>${escapeHtml(destination)}</h1>
+        <div class="hero-title"><p class="kicker">${en ? "TRAVEL DESTINATION" : "旅行目的地"}</p><h1>${escapeHtml(destination)}</h1>
           <p class="passport-label">${en ? "WANT TO GO PASSPORT" : "想去护照"}</p></div>
         <div class="hero-meta" aria-label="${en ? "Passport summary" : "护照摘要"}">
+          <div><span>${en ? "DAYS" : "行程天数"}</span><strong>${dayCount || "—"}</strong></div>
           <div><span>${en ? "PLACES" : "地点"}</span><strong>${places.length}</strong></div>
-          <div><span>${en ? "SOURCES" : "原始链接"}</span><strong>${sourceLinkCount}</strong></div>
-          <div><span>${en ? "STATUS" : "状态"}</span><strong>${en ? "READY" : "已整理"}</strong></div>
+          <div><span>${en ? "AREAS" : "片区"}</span><strong>${areaCount}</strong></div>
         </div>
+        <p class="hero-summary">${escapeHtml(brief)}</p>
       </div>
       <aside class="hero-stub" aria-label="${en ? "Trip document stub" : "行程票存根"}">
-        <div><span class="stub-label">DESTINATION</span><p class="stub-destination">${escapeHtml(destination)}</p></div>
-        <div class="stub-facts">
-          <div><span class="stub-label">${en ? "DAYS" : "行程天数"}</span><strong>${dayCount || "—"}</strong></div>
-          <div><span class="stub-label">PLACES</span><strong>${places.length}</strong></div>
-          <div><span class="stub-label">${en ? "SOURCE" : "原始链接"}</span><strong>${sourceLinkCount ? (en ? "YES" : "有") : (en ? "NONE" : "无")}</strong></div>
-        </div>
-        <p class="stub-note">KORNVIA TRIP DOCUMENT<br>${en ? "ORIGINAL IMAGES AND SOURCES RETAINED" : "原图保留，来源可追溯"}</p>
+        <div><span class="stub-label">${en ? "DESTINATION" : "目的地"}</span><p class="stub-destination">${escapeHtml(destination)}</p></div>
+        ${dateRange ? `<div class="stub-dates"><span class="stub-label">${en ? "TRIP DATES" : "行程日期"}</span><strong>${escapeHtml(dateRange)}</strong></div>` : ""}
+        <p class="stub-note">KORNVIA TRIP DOCUMENT</p>
       </aside>
     </header>
+    ${routePlanSection(report.routePlan, en)}
     <section class="manifest" aria-labelledby="manifest-title">
       <div class="manifest-copy"><p class="kicker">TRIP MANIFEST</p>
         <h2 id="manifest-title">${en ? "A want-to-go itinerary you can take with you" : "一张能带走的想去行程单"}</h2>
         <p>${en ? "Places stay grouped by area, with display images, addresses, reminders and only the source links you actually submitted." : "地点按片区整理，保留展示配图、地址和出发提醒；只有你实际提交过的原始链接才会显示。"}</p>
       </div>
-      <div class="area-route" aria-label="${en ? "Area summary" : "片区摘要"}">${areas.map(([area, count], index) => `
+      <div class="area-route" aria-label="${en ? "Area summary" : "片区摘要"}">${areas.slice(0, 8).map(([area, count], index) => `
         <div class="route-stop"><span class="stop-number">${String(index + 1).padStart(2, "0")}</span><span class="route-name">${escapeHtml(area)}</span><span class="route-count">${count} ${en ? "PLACE" : "个地点"}</span></div>`).join("")}
       </div>
     </section>
-    ${routePlanSection(report.routePlan, en)}
     <section class="grid">${places.map((place) => card(place, locale, baseDir, report.mapRegion, destination)).join("")}</section>
     ${riskPanel(report.tripRisks, en, "trip-risks")}
     ${retained ? `<aside class="retained">${en

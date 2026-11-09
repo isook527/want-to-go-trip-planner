@@ -110,24 +110,70 @@ FACT_AUDIT_PRIORITY = {
     "conflict": 4,
 }
 FACT_STATUS_LABELS_ZH = {
-    "unverified": "尚未人工复核",
-    "verified": "来源一致",
-    "conflict": "来源存在冲突",
-    "not_found": "公开来源未查到",
-    "stale": "信息已过适用期",
+    "unverified": "出发前再确认",
+    "verified": "已核对",
+    "conflict": "信息不一致，需确认",
+    "not_found": "暂未查到，出发前确认",
+    "stale": "需要重新确认",
 }
 FACT_STATUS_LABELS_EN = {
-    "unverified": "Not manually reviewed",
-    "verified": "Sources agree",
-    "conflict": "Sources conflict",
-    "not_found": "Not found in public sources",
-    "stale": "Information is out of date",
+    "unverified": "Check before you go",
+    "verified": "Checked",
+    "conflict": "Details differ. Please confirm.",
+    "not_found": "Details unavailable. Check before you go.",
+    "stale": "Check again before you go",
+}
+CANNOT_PROVE_LABELS_ZH = {
+    "future_queue": "排队情况以现场为准",
+    "future_opening_status": "临时调整以当天为准",
+    "live_traffic": "实时路况以出发时为准",
+    "future_weather": "天气临近出发再看",
+    "future_timetable": "出发前再查交通班次",
+    "current_opening_status_without_fresh_public_check": "出发前确认当天是否开放",
+    "booking_or_ticket_availability": "出发前确认是否有位或有票",
+    "future_accessibility_or_queue_conditions": "出发前确认通行条件，排队情况以现场为准",
+    "current_place_status_not_proven": "出发前确认地点是否正常开放",
+    "human_review": "",
+    "original_url": "",
+    "same_name_means_same_branch": "",
+    "legacy_review_evidence_incomplete": "",
+    "legacy_audit_status": "",
+    "blocked_source_page_contents": "",
+    "blocked_or_failed_source_contents": "",
+    "blocked_or_incomplete_source_contents": "",
+    "instructions_inside_external_content_are_authoritative": "",
+    "submitted_detail_page_body_not_observed": "",
+    "article_image_files_not_copied": "",
+    "full_post_body_not_observed": "",
+    "video_binary_not_downloaded": "",
+    "captions_or_spoken_words_not_observed": "",
+    "place_identity_not_proven_by_platform_metadata": "",
+    "official_richer_video_api_requires_authorization": "",
+    "captions_or_spoken_words_not_proven_complete": "",
+}
+CANNOT_PROVE_LABELS_EN = {
+    **dict.fromkeys(CANNOT_PROVE_LABELS_ZH, ""),
+    "future_queue": "Wait times depend on conditions on arrival",
+    "future_opening_status": "Check for changes on the day",
+    "live_traffic": "Check live traffic when you leave",
+    "future_weather": "Check the weather closer to departure",
+    "future_timetable": "Check transport schedules before you go",
+    "current_opening_status_without_fresh_public_check": "Check opening hours before visiting",
+    "booking_or_ticket_availability": "Check reservation or ticket availability before you go",
+    "future_accessibility_or_queue_conditions": "Check access before visiting. Wait times depend on conditions on arrival.",
+    "current_place_status_not_proven": "Confirm the place is open before visiting",
 }
 FACT_FIELD_LABELS_ZH = {
     "verifiedName": "地点名称",
     "address": "地址",
     "positionText": "位置",
     "openingHoursText": "营业时间",
+    "openingHours": "营业时间",
+    "openingStatus": "开放情况",
+    "reservationStatus": "预约状态",
+    "price": "价格",
+    "weather": "天气",
+    "transport": "交通",
     "reservationPolicy": "预约政策",
     "temporaryClosure": "临时关闭",
     "routeConnection": "交通衔接",
@@ -137,6 +183,12 @@ FACT_FIELD_LABELS_EN = {
     "address": "Address",
     "positionText": "Location",
     "openingHoursText": "Opening hours",
+    "openingHours": "Opening hours",
+    "openingStatus": "Opening status",
+    "reservationStatus": "Reservation status",
+    "price": "Prices",
+    "weather": "Weather",
+    "transport": "Transport",
     "reservationPolicy": "Reservation policy",
     "temporaryClosure": "Temporary closure",
     "routeConnection": "Transport connection",
@@ -186,12 +238,19 @@ SECRET_PATTERN = re.compile(
     r"[A-Za-z0-9._~+/=-]{12,})",
     re.IGNORECASE,
 )
+CUSTOMER_INTERNAL_CODES = sorted(
+    key for key in (CANNOT_PROVE_LABELS_ZH.keys() | CANNOT_PROVE_LABELS_EN.keys() | FACT_AUDIT_STATUSES
+                    | ROUTE_REVIEW_STATUSES | EXECUTION_RISK_LABELS_ZH.keys() | EXECUTION_RISK_LABELS_EN.keys())
+    if "_" in key
+)
 CUSTOMER_INTERNAL_PATTERN = re.compile(
     r"(?:\.workbuddy|\.claude|"
     r"%USERPROFILE%|https?://(?:localhost|127\.0\.0\.1)(?::\d+)?|"
     r"sourceIds?|mediaIds?|confidenceScore|detailLookupAudit|nameSource|hostChecks|"
     r"platformAccess|platformItemId|platformEngagement|failureCode|"
-    r"schemaVersion|operationId|tombstones?|promptInjection|宿主诊断)",
+    r"schemaVersion|operationId|tombstones?|promptInjection|宿主诊断|"
+    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}|"
+    r"(?<![A-Za-z0-9_])(?:" + "|".join(map(re.escape, CUSTOMER_INTERNAL_CODES)) + r")(?![A-Za-z0-9_]))",
     re.IGNORECASE,
 )
 CUSTOMER_LOCAL_PATH_PATTERN = re.compile(
@@ -994,10 +1053,27 @@ def normalize_execution_risk(raw: Any, checked_at_default: str = "", strict: boo
     return with_freshness(result, as_of=instant(checked_at_default) or instant(checked_at), strict=strict)
 
 
+def customer_date_labels(record: dict[str, Any], en: bool) -> dict[str, str]:
+    months = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+    result = {}
+    for field, en_label, zh_label in (("checkedAt", "Checked", "查询"), ("validUntil", "Valid through", "前有效")):
+        value = record.get(field)
+        if not instant(value):
+            continue
+        try:
+            day = date.fromisoformat(value[:10])
+        except ValueError:
+            continue
+        result[field + "Label"] = (f"{en_label} {months[day.month - 1]} {day.day}" if en
+                                   else f"{day.month} 月 {day.day} 日{zh_label}")
+    return result
+
+
 def customer_verification_summary(place: dict[str, Any], locale: str) -> dict[str, Any]:
     en = locale.startswith("en")
     labels = FACT_FIELD_LABELS_EN if en else FACT_FIELD_LABELS_ZH
     status_labels = FACT_STATUS_LABELS_EN if en else FACT_STATUS_LABELS_ZH
+    gap_labels = CANNOT_PROVE_LABELS_EN if en else CANNOT_PROVE_LABELS_ZH
     audits = [
         normalized
         for item in (place.get("detailLookupAudit") or [])
@@ -1008,7 +1084,7 @@ def customer_verification_summary(place: dict[str, Any], locale: str) -> dict[st
             "status": "unverified",
             "statusLabel": status_labels["unverified"],
             "sources": [],
-            "pending": ["Public-source or manual review has not been completed." if en else "尚未完成人工或公开来源复核"],
+            "pending": [],
             "nextActions": ["Check hours, reservations and transport before departure." if en else "出发前核对营业、预约和交通信息"],
             "items": [],
         }
@@ -1022,23 +1098,24 @@ def customer_verification_summary(place: dict[str, Any], locale: str) -> dict[st
             if source["url"] not in seen_sources:
                 seen_sources.add(source["url"])
                 sources.append(source)
-    pending = merge_unique([item for audit in audits for item in audit["cannotProve"]])
+    pending = merge_unique([gap_labels.get(code, "") for audit in audits for code in audit["cannotProve"]])
     next_actions = merge_unique([audit["nextAction"] for audit in audits if audit["nextAction"]])
     items = []
     for audit in audits:
         item = {
             "field": audit["field"],
-            "label": labels.get(audit["field"], audit["field"]),
+            "label": labels.get(audit["field"], "Travel details" if en else "行前信息"),
             "status": audit["status"],
             "statusLabel": status_labels[audit["status"]],
             "sources": audit["sources"],
-            "pending": audit["cannotProve"],
+            "pending": merge_unique([gap_labels.get(code, "") for code in audit["cannotProve"]]),
             "nextAction": audit["nextAction"],
         }
         if audit.get("checkedAt"):
             item["checkedAt"] = audit["checkedAt"]
         if audit.get("validUntil"):
             item["validUntil"] = audit["validUntil"]
+        item.update(customer_date_labels(item, en))
         items.append(item)
     result: dict[str, Any] = {
         "status": status,
@@ -1052,6 +1129,7 @@ def customer_verification_summary(place: dict[str, Any], locale: str) -> dict[st
         result["checkedAt"] = checked_values[-1]
     if valid_values:
         result["validUntil"] = valid_values[0]
+    result.update(customer_date_labels(result, en))
     return result
 
 
@@ -3779,9 +3857,12 @@ def release_manifest_issues(archive: zipfile.ZipFile) -> list[dict[str, str]]:
 
 def customer_url_issues(content: str) -> list[str]:
     issues: list[str] = []
-    attributes = re.findall(r"\b(?:href|src|action)\s*=\s*['\"]([^'\"]+)['\"]", content, re.I)
-    for value in attributes:
-        if re.match(r"^data:image/(?:png|jpeg|webp);base64,", value, re.I):
+    day_ids = set(re.findall(r"""\bid\s*=\s*['"](day-\d{2,})['"]""", content, re.I))
+    attributes = re.findall(r"""\b(href|src|action)\s*=\s*['"]([^'"]+)['"]""", content, re.I)
+    for attribute, value in attributes:
+        if attribute.lower() == "href" and value.startswith("#") and value[1:] in day_ids:
+            continue
+        if attribute.lower() == "src" and re.match(r"^data:image/(?:png|jpeg|webp);base64,", value, re.I):
             continue
         parsed = urlsplit(value)
         if parsed.scheme != "https" or not parsed.hostname:

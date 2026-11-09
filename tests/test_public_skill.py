@@ -2198,7 +2198,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
                             "kind": "official",
                         }
                     ],
-                    "cannotProve": ["future_queue"],
+                    "cannotProve": ["future_queue", "original_url", "unknown_gap_code"],
                     "nextAction": "出发当天再次确认是否临时调整",
                 }
             ],
@@ -2216,7 +2216,10 @@ class PublicSkillRegressionTests(unittest.TestCase):
         self.assertEqual(summary["validUntil"], "2026-08-18T08:00:00Z")
         self.assertEqual(summary["items"][0]["label"], "营业时间")
         self.assertEqual(summary["sources"][0]["url"], "https://example.com/official-hours")
-        self.assertEqual(summary["pending"], ["future_queue"])
+        self.assertEqual(summary["pending"], ["排队情况以现场为准"])
+        self.assertEqual(summary["items"][0]["pending"], summary["pending"])
+        self.assertEqual(summary["checkedAtLabel"], "8 月 11 日查询")
+        self.assertEqual(summary["validUntilLabel"], "8 月 18 日前有效")
         self.assertEqual(summary["nextActions"], ["出发当天再次确认是否临时调整"])
         self.assertNotIn("detailLookupAudit", customer)
 
@@ -2224,7 +2227,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
         customer = W2G.customer_place(complete_business(detailLookupAudit=[]), "zh-CN")
         summary = customer["verificationSummary"]
         self.assertEqual(summary["status"], "unverified")
-        self.assertEqual(summary["statusLabel"], "尚未人工复核")
+        self.assertEqual(summary["statusLabel"], "出发前再确认")
         self.assertEqual(summary["sources"], [])
         self.assertTrue(summary["nextActions"])
 
@@ -2262,7 +2265,8 @@ class PublicSkillRegressionTests(unittest.TestCase):
             "tripRisks": [],
             "retainedClueCount": 0,
         })
-        self.assertIn("核验状态", html)
+        self.assertIn("出发前确认营业与交通", html)
+        self.assertNotIn('<details class="verification', html)
         self.assertIn("最后一公里", html)
         self.assertIn("公开接驳班次尚未查到", html)
         self.assertNotIn("detailLookupAudit", html)
@@ -2553,10 +2557,11 @@ class PublicSkillRegressionTests(unittest.TestCase):
         })
         for phrase in (
             "WANT TO GO PASSPORT", "A want-to-go itinerary you can take with you",
-            "Verification status", "Open original saved link",
-            "DAY-BY-DAY PLAN", "Schematic route",
+            "Check opening hours and transport before you go.", "Open original saved link",
+            "DAY-BY-DAY PLAN", 'href="#day-01"', 'id="day-01"',
         ):
             self.assertIn(phrase, html)
+        self.assertNotIn('class="route-map"', html)
         for chinese_label in ("当地名称", "营业", "想去理由", "提交行程需求"):
             self.assertNotIn(chinese_label, html)
 
