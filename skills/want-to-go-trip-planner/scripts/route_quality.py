@@ -13,6 +13,12 @@ BLOCKS = {"morning": ("06:00", "12:00"), "midday": ("11:00", "14:00"),
 DAY_NOTES = ("lunch", "rest", "backup", "dropIfDelayed", "tradeoff")
 
 
+def normalize_area(value):
+    if not isinstance(value, str) or len(value.strip()) > 80:
+        raise ValueError("area must be text of at most 80 characters")
+    return value.strip()
+
+
 def normalize_budget(value):
     if value is None:
         return []

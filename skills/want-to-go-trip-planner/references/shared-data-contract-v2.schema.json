@@ -519,6 +519,10 @@
         "localName": {
           "type": "string"
         },
+        "area": {
+          "type": "string",
+          "maxLength": 80
+        },
         "placeType": {
           "enum": [
             "business",

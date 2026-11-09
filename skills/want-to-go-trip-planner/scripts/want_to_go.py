@@ -29,7 +29,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fact_freshness import instant, with_freshness
 from route_quality import (
-    DAY_NOTES, WEEKDAYS, bounded_int, connection_status, lint_route, normalize_budget, normalize_opening_hours, normalize_timing,
+    DAY_NOTES, WEEKDAYS, bounded_int, connection_status, lint_route, normalize_area, normalize_budget, normalize_opening_hours, normalize_timing,
 )
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "product.json"
@@ -219,7 +219,7 @@ AUDIT_SOURCE_KINDS = {"official", "reliable_public"}
 EDITABLE_PLACE_FIELDS = {
     "name", "verifiedName", "localName", "placeType", "category", "categoryLabel",
     "branch", "branchName", "address", "addressText", "positionText", "openingHoursText",
-    "openingHours", "mapRegion", "signature", "reason", "whyGo", "highlight", "visitTip", "reminder",
+    "openingHours", "mapRegion", "area", "signature", "reason", "whyGo", "highlight", "visitTip", "reminder",
     "departureReminder", "departureTip", "routeStart", "routeEnd", "waypoints",
     "suggestedDuration", "durationText", "destination", "displayMediaId",
 }
@@ -1347,6 +1347,9 @@ def customer_place(
         "branch": first(place, "branch", "branchName"),
         "address": first(place, "address", "addressText"),
         "positionText": first(place, "positionText"),
+        "area": first(place, "area"),
+        "areaGroup": first(place, "areaGroup"),
+        "district": first(place, "district"),
         "openingHoursText": hours,
         "mapRegion": place.get("mapRegion") if place.get("mapRegion") in ("mainland", "outside_mainland", "unknown") else "",
         "signature": first(place, "signature", "reason", "whyGo", "highlight"),
@@ -1363,13 +1366,13 @@ def customer_place(
     if content_depth == "compact":
         allowed = {
             "id", "name", "placeType", "category", "address", "positionText",
-            "openingHoursText", "visitTip", "photo", "originalSourceLinks", "mapRegion",
+            "openingHoursText", "visitTip", "photo", "originalSourceLinks", "mapRegion", "area", "areaGroup", "district",
             "verificationSummary", "executionRisks",
         }
         result = {key: value for key, value in result.items() if key in allowed}
     elif content_depth == "deep":
         result.update({
-            "areaGroup": first(place, "areaGroup", "district", "neighborhood"),
+            "areaGroup": first(place, "areaGroup", "district"),
             "accessibilityNote": first(place, "accessibilityNote"),
             "verificationStatus": first(place, "verificationStatus"),
         })
@@ -2541,6 +2544,8 @@ def command_promote(args: argparse.Namespace) -> None:
             source_ids = [source_id_map[item] for item in linked_raw_ids if item in source_id_map]
             links = links_from_evidence(linked_sources)
             place = copy.deepcopy(selection)
+            if "area" in place:
+                place["area"] = normalize_area(place["area"])
             place["id"] = text(place.get("id")) or f"place-{uuid.uuid4().hex[:12]}"
             place["name"] = name
             place["bundleId"] = args.bundle_id
@@ -2822,6 +2827,8 @@ def read_patch(path: str) -> dict[str, Any]:
         if field == "waypoints":
             if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
                 raise ValueError("waypoints must be an array of strings")
+        elif field == "area":
+            patch["area"] = normalize_area(value)
         elif field == "mapRegion":
             if value not in ("mainland", "outside_mainland", "unknown"):
                 raise ValueError("mapRegion must be mainland, outside_mainland or unknown")
@@ -2864,8 +2871,8 @@ def command_edit(args: argparse.Namespace) -> None:
             ),
             None,
         )
-        if active_route:
-            raise ValueError("place is used by the active route; save a revised route before deleting it")
+        if active_route and set(patch) != {"area"}:
+            raise ValueError("place is used by the active route; save a revised route before changing its details")
         if text(patch.get("displayMediaId")):
             allowed_media = set(place.get("mediaIds") or [])
             if text(patch["displayMediaId"]) not in allowed_media:

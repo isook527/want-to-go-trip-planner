@@ -292,14 +292,35 @@ function riskPanel(risks, en, className = "risk-list") {
   </section>`;
 }
 
-function publicAreas(places, en) {
-  const counts = new Map();
-  for (const place of places) {
-    const label = clean(place.areaGroup || place.area || place.district || place.neighborhood || place.branch, 80)
-      || (en ? "SAVED PLACES" : "未分片区");
-    counts.set(label, (counts.get(label) || 0) + 1);
+function placeArea(place, destination) {
+  for (const key of ["area", "areaGroup", "district"]) {
+    const value = typeof place[key] === "string" ? clean(place[key], 80) : "";
+    if (value) return value;
   }
-  return [...counts.entries()];
+  const parts = clean(place.address, 400).split(/[,，]/).map((part) => part.trim()).filter(Boolean);
+  if (parts.length < 3) return "";
+  const candidate = parts.at(-2).replace(/\s+\d{4,6}$/, "").trim();
+  const cityNames = [place.city, place.destination, destination, parts.at(-1)].map(
+    (name) => clean(name, 80).replace(/\s+\d{4,6}$/, "").toLowerCase(),
+  );
+  return cityNames.includes(candidate.toLowerCase()) ? "" : clean(candidate, 80);
+}
+
+function publicAreas(places, destination) {
+  const groups = new Map();
+  let unknown = 0;
+  for (const place of places) {
+    const label = placeArea(place, destination);
+    if (!label) {
+      unknown += 1;
+      continue;
+    }
+    const key = label.toLowerCase();
+    const group = groups.get(key) || [label, 0];
+    group[1] += 1;
+    groups.set(key, group);
+  }
+  return {groups: [...groups.values()], unknown};
 }
 
 function routePlanSection(plan, en) {
@@ -355,7 +376,7 @@ function card(place, locale, baseDir, mapRegion, destination) {
         ${fact(en ? "Address" : "地址", place.address || place.positionText)}
         ${fact(en ? "Hours" : "营业", place.openingHoursText)}
         ${fact(en ? "Duration" : "建议时长", place.suggestedDuration)}
-        ${fact(en ? "Area" : "片区", place.areaGroup)}
+        ${fact(en ? "Area" : "片区", placeArea(place, destination))}
         ${fact(en ? "Accessibility" : "无障碍提示", place.accessibilityNote)}
         ${fact(en ? "Review status" : "复核状态", place.verificationStatus)}
         ${fact(en ? "Why go" : "想去理由", place.signature)}
@@ -392,8 +413,10 @@ function render(report, inputPath) {
   const places = Array.isArray(report.places) ? report.places : [];
   const retained = Math.max(0, Number(report.retainedClueCount || 0));
   const destination = clean(report.destination, 80) || (en ? "MY TRIP" : "我的旅程");
-  const areas = publicAreas(places, en);
-  const areaCount = areas.filter(([label]) => label !== (en ? "SAVED PLACES" : "未分片区")).length;
+  const {groups, unknown} = publicAreas(places, destination);
+  const areaCount = groups.length;
+  const areas = unknown > places.length / 2 ? []
+    : [...groups, ...(unknown ? [[en ? "Area to confirm" : "待定片区", unknown]] : [])];
   const baseDir = path.dirname(inputPath);
   const dayCount = Array.isArray(report.routePlan?.days) ? report.routePlan.days.length : 0;
   const dateRange = tripDateRange(report.routePlan, dayCount, locale);
@@ -430,9 +453,9 @@ function render(report, inputPath) {
         <h2 id="manifest-title">${en ? "A want-to-go itinerary you can take with you" : "一张能带走的想去行程单"}</h2>
         <p>${en ? "Places stay grouped by area, with display images, addresses, reminders and only the source links you actually submitted." : "地点按片区整理，保留展示配图、地址和出发提醒；只有你实际提交过的原始链接才会显示。"}</p>
       </div>
-      <div class="area-route" aria-label="${en ? "Area summary" : "片区摘要"}">${areas.slice(0, 8).map(([area, count], index) => `
-        <div class="route-stop"><span class="stop-number">${String(index + 1).padStart(2, "0")}</span><span class="route-name">${escapeHtml(area)}</span><span class="route-count">${count} ${en ? "PLACE" : "个地点"}</span></div>`).join("")}
-      </div>
+      ${areas.length ? `<div class="area-route" aria-label="${en ? "Area summary" : "片区摘要"}">${areas.slice(0, 8).map(([area, count], index) => `
+        <div class="route-stop"><span class="stop-number">${String(index + 1).padStart(2, "0")}</span><span class="route-name">${escapeHtml(area)}</span><span class="route-count">${count} ${en ? (count === 1 ? "PLACE" : "PLACES") : "个地点"}</span></div>`).join("")}
+      </div>` : ""}
     </section>
     <section class="grid">${places.map((place) => card(place, locale, baseDir, report.mapRegion, destination)).join("")}</section>
     ${riskPanel(report.tripRisks, en, "trip-risks")}
