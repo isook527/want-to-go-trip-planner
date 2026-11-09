@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """Local travel library shared with earlier agent editions."""
 import argparse
 import errno
@@ -18,7 +19,38 @@ from route_quality import normalize_area
 
 
 LANGUAGE = "en-US"
-ZH = {'Library error: ': '想去库错误：', 'Cannot overwrite the library database or original sources': '不能覆盖想去库数据库或原始素材', ' Places Passport': '想去地点护照', 'Confirm and distinguish branches with identical names before export': '同名地点需要先核实并区分分店，避免遗漏或误合并', 'Run the skill script by absolute path from the user project, not from the installed skill directory.': '请在用户项目目录通过技能脚本的绝对路径运行，避免将想去库误存到技能安装目录', 'Local Go Passport library': '本地想去库', 'A place is already part of a merge. Review the existing merge first.': '地点已合并或包含其他合并项，需人工核对', 'Both places must exist in the same city. Confirm the city first.': '两个地点必须存在且城市一致，先核实城市', 'Cannot merge a place into itself': '不能将地点合并到自身', 'A source that failed to save cannot be marked processed': '保存失败的来源不能标为已处理', 'Source not found': '未找到来源', 'Original batch not found': '未找到原收藏批次', 'Invalid additional place name, city, aliases, or status': '补充地点的名称、城市、别名或状态无效', 'Additional places must be a non-empty array': '补充地点必须是非空数组', 'Invalid updated name, status, or city aliases': '更正后的名称、状态或城市别名无效', 'Place not found': '未找到该地点', 'The update contains unsupported fields': '更正文件包含不支持的字段', 'Provide a destination': '请提供目的地', 'Source file changed during copying': '源文件复制期间发生变化', 'Source file is missing or unreadable': '源文件不存在或不可读取', 'This batch ID exists with different content. Use a new batch ID.': '该批次 ID 已存在且内容不同，请使用新的批次 ID', 'Identified places require a city. Use pending if uncertain.': '已识别地点必须有城市；不确定时标记 pending', 'city_aliases must be an array': 'city_aliases 必须为数组', 'Place status must be identified or pending': '地点状态必须为 identified 或 pending', 'Each place requires a name': '地点必须有名称', 'Each source requires path, url, or text': '每条来源必须提供 path、url 或 text', 'Source type must be image, video, file, link, or text': '来源类型必须为 image、video、file、link 或 text', 'places must be an array': 'places 必须是数组', 'Each batch requires a non-empty sources array': '每批必须提供非空 sources 数组', 'Two libraries found. Specify the library you previously used.': '发现两个想去库，请指定原来使用的库，避免遗漏收藏'}
+ZH = {
+    'Library error: ': '想去库错误：',
+    'Cannot overwrite the library database or original sources': '不能覆盖想去库数据库或原始素材',
+    ' Places Passport': '想去地点护照',
+    'Confirm and distinguish branches with identical names before export': '同名地点需要先核实并区分分店，避免遗漏或误合并',
+    'Run the skill script by absolute path from the user project, not from the installed skill directory.': '请在用户项目目录通过技能脚本的绝对路径运行，避免将想去库误存到技能安装目录',
+    'Local Go Passport library': '本地想去库',
+    'A place is already part of a merge. Review the existing merge first.': '地点已合并或包含其他合并项，需人工核对',
+    'Both places must exist in the same city. Confirm the city first.': '两个地点必须存在且城市一致，先核实城市',
+    'Cannot merge a place into itself': '不能将地点合并到自身',
+    'A source that failed to save cannot be marked processed': '保存失败的来源不能标为已处理',
+    'Source not found': '未找到来源',
+    'Original batch not found': '未找到原收藏批次',
+    'Invalid additional place name, city, aliases, or status': '补充地点的名称、城市、别名或状态无效',
+    'Additional places must be a non-empty array': '补充地点必须是非空数组',
+    'Invalid updated name, status, or city aliases': '更正后的名称、状态或城市别名无效',
+    'Place not found': '未找到该地点',
+    'The update contains unsupported fields': '更正文件包含不支持的字段',
+    'Provide a destination': '请提供目的地',
+    'Source file changed during copying': '源文件复制期间发生变化',
+    'Source file is missing or unreadable': '源文件不存在或不可读取',
+    'This batch ID exists with different content. Use a new batch ID.': '该批次 ID 已存在且内容不同，请使用新的批次 ID',
+    'Identified places require a city. Use pending if uncertain.': '已识别地点必须有城市；不确定时标记 pending',
+    'city_aliases must be an array': 'city_aliases 必须为数组',
+    'Place status must be identified or pending': '地点状态必须为 identified 或 pending',
+    'Each place requires a name': '地点必须有名称',
+    'Each source requires path, url, or text': '每条来源必须提供 path、url 或 text',
+    'Source type must be image, video, file, link, or text': '来源类型必须为 image、video、file、link 或 text',
+    'places must be an array': 'places 必须是数组',
+    'Each batch requires a non-empty sources array': '每批必须提供非空 sources 数组',
+    'Two libraries found. Specify the library you previously used.': '发现两个想去库，请指定原来使用的库，避免遗漏收藏',
+}
 
 
 ZH["area must be text of at most 80 characters"] = "片区须为不超过 80 个字符的文本"

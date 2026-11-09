@@ -108,8 +108,8 @@
     },
     {
       "path": "scripts/library.py",
-      "size": 22501,
-      "sha256": "3027f8038fc5fcb1664b2da8398341e3aa1672f6872187106aa2080460c0fe4b"
+      "size": 22648,
+      "sha256": "6fd721a3e43d9803fbc1f867fd5c4e6a108d7581336c64e0d0925ef28840d2ef"
     },
     {
       "path": "scripts/ocr.py",
