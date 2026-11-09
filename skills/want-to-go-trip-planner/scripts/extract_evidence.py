@@ -2,7 +2,6 @@
 """Extract local place evidence from public links, screenshots, or text."""
 
 import argparse
-import base64
 import csv
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
@@ -569,48 +568,8 @@ def windows_current_user_sid():
 
 
 def apply_and_verify_windows_private_acl(path, sid, directory=False):
-    powershell = shutil.which("powershell.exe") or shutil.which("powershell") or shutil.which("pwsh")
-    if not powershell:
-        return False
-    script = r"""
-$Target = $env:WTG_ACL_TARGET
-$ExpectedSid = $env:WTG_ACL_SID
-$DirectoryFlag = $env:WTG_ACL_DIRECTORY
-$ErrorActionPreference = 'Stop'
-$inheritance = if ($DirectoryFlag -eq 'true') { 'OICI' } else { '' }
-$descriptor = 'D:P(A;' + $inheritance + ';FA;;;' + $ExpectedSid + ')'
-try {
-  $acl = Get-Acl -LiteralPath $Target
-  $acl.SetSecurityDescriptorSddlForm($descriptor, [System.Security.AccessControl.AccessControlSections]::Access)
-  Set-Acl -LiteralPath $Target -AclObject $acl
-} catch { exit 43 }
-try {
-  $acl = Get-Acl -LiteralPath $Target
-  $rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
-  if (-not $acl.AreAccessRulesProtected -or $rules.Count -ne 1) { exit 41 }
-  $rule = $rules[0]
-  $full = [System.Security.AccessControl.FileSystemRights]::FullControl
-  $hasFull = (([int]$rule.FileSystemRights -band [int]$full) -eq [int]$full)
-  if ($rule.IdentityReference.Value -ne $ExpectedSid -or $rule.AccessControlType -ne 'Allow' -or -not $hasFull) { exit 42 }
-} catch { exit 44 }
-"""
-    command = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
-    result = subprocess.run(
-        [powershell, "-NoProfile", "-NonInteractive", "-EncodedCommand", command],
-        env={
-            **os.environ,
-            "WTG_ACL_TARGET": str(Path(path).absolute()),
-            "WTG_ACL_SID": sid,
-            "WTG_ACL_DIRECTORY": str(bool(directory)).lower(),
-        },
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        timeout=30,
-        check=False,
-    )
-    if result.returncode != 0:
-        raise PermissionError(f"PRIVATE_PERMISSION_ENFORCEMENT_FAILED: WINDOWS_ACL_EXIT_{result.returncode}")
-    return True
+    from windows_acl import apply_private_acl
+    return apply_private_acl(path, sid, directory)
 
 
 def restrict_path_to_current_user(path, directory=False):
@@ -620,7 +579,7 @@ def restrict_path_to_current_user(path, directory=False):
         sid = windows_current_user_sid()
         try:
             if not apply_and_verify_windows_private_acl(target, sid, directory):
-                raise PermissionError("PRIVATE_PERMISSION_ENFORCEMENT_FAILED: POWERSHELL_UNAVAILABLE")
+                raise PermissionError("PRIVATE_PERMISSION_ENFORCEMENT_FAILED")
         except subprocess.SubprocessError as error:
             raise PermissionError("PRIVATE_PERMISSION_ENFORCEMENT_FAILED") from error
         return

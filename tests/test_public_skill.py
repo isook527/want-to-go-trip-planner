@@ -27,6 +27,8 @@ DISPLAY_SCRIPT = SKILL / "scripts" / "prepare_display_image.py"
 EXTRACT_SCRIPT = SKILL / "scripts" / "extract_evidence.py"
 BUILD_SCRIPT = SKILL / "scripts" / "build_release.py"
 
+sys.path.insert(0, str(SCRIPT.parent))
+
 SPEC = importlib.util.spec_from_file_location("want_to_go", SCRIPT)
 assert SPEC and SPEC.loader
 W2G = importlib.util.module_from_spec(SPEC)
@@ -3193,14 +3195,12 @@ class PublicSkillRegressionTests(unittest.TestCase):
             self.assertFalse(EXTRACT.opencli_user_extensions_absent(home))
 
     def test_109_private_permission_failures_are_not_silently_ignored(self):
-        completed = argparse.Namespace(returncode=1, stdout="", stderr="")
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "customer-evidence.json"
             with (
                 mock.patch.object(EXTRACT.sys, "platform", "win32"),
                 mock.patch.object(EXTRACT, "windows_current_user_sid", return_value="S-1-5-21-1"),
-                mock.patch.object(EXTRACT.shutil, "which", return_value="powershell.exe"),
-                mock.patch.object(EXTRACT.subprocess, "run", return_value=completed),
+                mock.patch.object(EXTRACT, "apply_and_verify_windows_private_acl", return_value=False),
             ):
                 with self.assertRaisesRegex(PermissionError, "PRIVATE_PERMISSION_ENFORCEMENT_FAILED"):
                     EXTRACT.restrict_path_to_current_user(output)

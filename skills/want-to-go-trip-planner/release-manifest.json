@@ -4,7 +4,7 @@
   "packageVersion": "3.0.1",
   "contractVersion": "2.4.0",
   "rootDirectory": "want-to-go-trip-planner",
-  "fileCount": 25,
+  "fileCount": 26,
   "files": [
     {
       "path": "LICENSE",
@@ -93,8 +93,8 @@
     },
     {
       "path": "scripts/extract_evidence.py",
-      "size": 108364,
-      "sha256": "0ed11e55f0fbe1deed3c76c1fe2cc1133d3d07f867d3ce02aaf8caf77a08e6cc"
+      "size": 106564,
+      "sha256": "ed22e8b789e0fd19c6b05ce01148acc473a73d365d59a129437db954330b9c93"
     },
     {
       "path": "scripts/library.py",
@@ -113,8 +113,8 @@
     },
     {
       "path": "scripts/prepare_display_image.py",
-      "size": 16030,
-      "sha256": "bb7066632faa5a5d6586584dfe8c3732d29562bdf3a0c837e15b9a06a0840c05"
+      "size": 14246,
+      "sha256": "56bb073e71ab28de5af2c768dcc76a3afd4653e9857f0495312b15c294789fbc"
     },
     {
       "path": "scripts/prepare_image_macos.swift",
@@ -130,6 +130,11 @@
       "path": "scripts/want_to_go.py",
       "size": 174032,
       "sha256": "45534d8dc238e78f271305bc59557ca928475de4efb56478606ea9365eb67f49"
+    },
+    {
+      "path": "scripts/windows_acl.py",
+      "size": 3747,
+      "sha256": "6676a5239355286f6c0fbe2ed242966469788a65b5b3abd6e9be5632481f4fff"
     }
   ]
 }
