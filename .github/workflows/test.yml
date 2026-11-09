@@ -57,6 +57,6 @@ jobs:
           }
           Write-Output ("Windows checker status: " + $doctor.status)
       - run: python -m unittest discover -s tests
-      - run: python want-to-go-trip-planner/scripts/build_release.py --zip dist/want-to-go-trip-planner-skill-3.2.2.zip
+      - run: python want-to-go-trip-planner/scripts/build_release.py --zip dist/want-to-go-trip-planner-skill-3.2.3.zip
       - run: git diff --exit-code -- want-to-go-trip-planner/release-manifest.json
-      - run: python want-to-go-trip-planner/scripts/want_to_go.py scan --path dist/want-to-go-trip-planner-skill-3.2.2.zip --mode package
+      - run: python want-to-go-trip-planner/scripts/want_to_go.py scan --path dist/want-to-go-trip-planner-skill-3.2.3.zip --mode package

@@ -1,5 +1,12 @@
 # 更新记录 · Changelog
 
+## 3.2.3
+
+- 修正中英文护照页面标题，并补充页面描述和分享预览信息。
+- 仓库历史已于 2026 年 11 月重写以移除提交元数据中的个人信息。改写前后的文件树和已发布 ZIP 一致。已有克隆或 fork 请按公告同步，已下载 ZIP 无需操作。[同步公告](https://github.com/isook527/want-to-go-trip-planner/issues/5)
+
+English: Updated the passport titles, descriptions and social previews. In November 2026 the repository history was rewritten to remove personal information from commit metadata. File trees and previously published ZIPs stayed identical across the rewrite. See the notice to sync existing clones and forks. ZIP users need no action. [Sync notice](https://github.com/isook527/want-to-go-trip-planner/issues/5)
+
 ## 3.2.2
 
 - 中英文 README 和仓库首页链接直达 GitHub Pages 的曼谷护照预览。

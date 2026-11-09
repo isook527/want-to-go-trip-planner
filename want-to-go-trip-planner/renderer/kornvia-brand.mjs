@@ -17,8 +17,8 @@ export function escapeHtml(value) {
 export function passportTitle(destination, locale = "zh-CN") {
   const name = String(destination || "").trim();
   return locale === "en-US"
-    ? `GO PASSPORT · ${(name || "MY TRIP").toLocaleUpperCase("en-US")}`
-    : `Go passport · ${name || "我的旅程"}`;
+    ? `Want to Go Passport · ${name || "My trip"}`
+    : `想去护照 · ${name || "我的旅程"}`;
 }
 
 export const KORNVIA_REPORT_CSS = `

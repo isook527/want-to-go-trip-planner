@@ -12,6 +12,7 @@ import {
 
 const MAX_INPUT_BYTES = 12 * 1024 * 1024;
 const MAX_PHOTO_BYTES = 16 * 1024 * 1024;
+const PAGES_PREVIEW_IMAGE = "https://raw.githubusercontent.com/isook527/want-to-go-trip-planner/main/docs/images/bangkok-passport-overview.png";
 const SENSITIVE_QUERY_KEYS = new Set([
   "xsec_token", "xsec_source", "access_token", "refresh_token", "auth_token",
   "authorization", "api_key", "apikey", "signature", "sig", "igsh",
@@ -420,13 +421,13 @@ function tripDateRange(plan, dayCount, locale) {
   return dayCount === 1 ? format.format(start) : format.formatRange(start, end);
 }
 
-function render(report, inputPath) {
+function render(report, inputPath, pagesExample) {
   const locale = report.locale === "en-US" ? "en-US" : "zh-CN";
   const en = locale === "en-US";
-  const title = passportTitle(report.destination, locale);
   const places = Array.isArray(report.places) ? report.places : [];
   const retained = Math.max(0, Number(report.retainedClueCount || 0));
-  const destination = clean(report.destination, 80) || (en ? "MY TRIP" : "我的旅程");
+  const destination = clean(report.destination, 80) || (en ? "My trip" : "我的旅程");
+  const title = passportTitle(destination, locale);
   const {groups, unknown} = publicAreas(places, destination);
   const areaCount = groups.length;
   const areas = unknown > places.length / 2 ? []
@@ -435,14 +436,23 @@ function render(report, inputPath) {
   const dayCount = Array.isArray(report.routePlan?.days) ? report.routePlan.days.length : 0;
   const dateRange = tripDateRange(report.routePlan, dayCount, locale);
   const stubAreas = groups.slice(0, 3).map(([area]) => area).join(" · ");
+  const daysLabel = dayCount ? (en ? `${dayCount} ${dayCount === 1 ? "day" : "days"}` : `${dayCount} 天`) : "";
+  const placesLabel = en ? `${places.length} ${places.length === 1 ? "place" : "places"}` : `${places.length} 个地点`;
   const brief = [
-    dayCount ? (en ? `${dayCount} ${dayCount === 1 ? "day" : "days"}` : `${dayCount} 天`) : "",
-    en ? `${places.length} ${places.length === 1 ? "place" : "places"}` : `${places.length} 个地点`,
+    daysLabel,
+    placesLabel,
     areaCount ? (en ? `${areaCount} ${areaCount === 1 ? "area" : "areas"}` : `${areaCount} 个片区`) : "",
     dateRange,
   ].filter(Boolean).join(" · ");
+  const description = en
+    ? `A Want to Go itinerary for ${destination} · ${[daysLabel, placesLabel].filter(Boolean).join(" · ")}`
+    : `${[destination, daysLabel].filter(Boolean).join(" ")} · ${placesLabel}的想去行程`;
   const html = `<!doctype html><html lang="${en ? "en" : "zh-CN"}"><head><meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title>
+  <meta name="description" content="${escapeHtml(description)}">
+  <meta property="og:title" content="${escapeHtml(title)}">
+  <meta property="og:description" content="${escapeHtml(description)}">
+  ${pagesExample ? `<meta property="og:image" content="${PAGES_PREVIEW_IMAGE}">` : ""}
   <style>${KORNVIA_REPORT_CSS}</style></head><body><main class="shell">
     <header class="hero ticket">
       <div class="hero-main">
@@ -483,8 +493,10 @@ function render(report, inputPath) {
 }
 
 function main() {
-  const [inputPath, outputPath] = process.argv.slice(2);
-  if (!inputPath || !outputPath) throw new Error("usage: render_report.mjs input.json output.html");
+  const [inputPath, outputPath, mode] = process.argv.slice(2);
+  if (!inputPath || !outputPath || (mode && mode !== "--pages-example")) {
+    throw new Error("usage: render_report.mjs input.json output.html [--pages-example]");
+  }
   const stat = fs.statSync(inputPath);
   if (!stat.isFile() || stat.size > MAX_INPUT_BYTES) throw new Error("invalid input");
   const report = JSON.parse(fs.readFileSync(inputPath, "utf8"));
@@ -492,7 +504,7 @@ function main() {
     throw new Error("no deliverable places");
   }
   if (report.placesOnly !== true && (!Array.isArray(report.routePlan?.days) || report.routePlan.days.length === 0)) throw new Error("no route plan");
-  const html = render(report, inputPath);
+  const html = render(report, inputPath, mode === "--pages-example");
   assertSafeUrlAttributes(html);
   const customerScanContent = customerTextForScan(html);
   if (INTERNAL_PATTERN.test(customerScanContent) || LOCAL_PATH_PATTERN.test(customerScanContent)) {

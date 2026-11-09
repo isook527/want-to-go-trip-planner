@@ -17,7 +17,7 @@ cp "$demo/bangkok-evidence-library.json" "$out/library.json"
 python3 "$skill/scripts/want_to_go.py" lint-route --library "$out/library.json" --destination 曼谷 --plan "$demo/bangkok-route.json"
 python3 "$skill/scripts/want_to_go.py" route-plan --library "$out/library.json" --destination 曼谷 --plan "$demo/bangkok-route.json"
 python3 "$skill/scripts/want_to_go.py" passport --library "$out/library.json" --destination 曼谷 --map-region outside_mainland --output "$out/passport.json"
-node "$skill/renderer/render_report.mjs" "$out/passport.json" "$out/passport.html"
+node "$skill/renderer/render_report.mjs" "$out/passport.json" "$out/passport.html" --pages-example
 python3 "$skill/scripts/want_to_go.py" scan --mode customer --path "$out/passport.html"
 python3 "$skill/scripts/render.py" "$demo/bangkok-lightweight.json" "$out/lightweight.html"
 ```
