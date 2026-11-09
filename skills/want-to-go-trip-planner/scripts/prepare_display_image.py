@@ -287,15 +287,15 @@ def prepare_display_image(
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{target.name}.", suffix=".tmp", dir=str(target.parent)
     )
-    os.close(descriptor)
     temporary = Path(temporary_name)
     replaced = False
     backup = target.parent / f".{target.name}.{os.urandom(12).hex()}.rollback"
     backup_moved = False
     committed = False
     try:
-        cropped.save(temporary, "JPEG", quality=90, optimize=True)
-        with temporary.open("rb") as handle:
+        with os.fdopen(descriptor, "wb") as handle:
+            cropped.save(handle, "JPEG", quality=90, optimize=True)
+            handle.flush()
             os.fsync(handle.fileno())
         restrict_path_to_current_user(temporary)
         if target.exists():

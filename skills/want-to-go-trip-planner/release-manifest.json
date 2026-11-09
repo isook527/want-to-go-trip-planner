@@ -113,8 +113,8 @@
     },
     {
       "path": "scripts/prepare_display_image.py",
-      "size": 14246,
-      "sha256": "56bb073e71ab28de5af2c768dcc76a3afd4653e9857f0495312b15c294789fbc"
+      "size": 14256,
+      "sha256": "381bc0bd76ad25dafc89ad9687ae1ef355d321b0f857915d197a4e37a7f57064"
     },
     {
       "path": "scripts/prepare_image_macos.swift",
