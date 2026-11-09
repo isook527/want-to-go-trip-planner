@@ -1,29 +1,70 @@
 # 想去就出发 · Want to Go
 
-把旅行截图、链接、视频和随手记收进本地想去库。准备出发时，让你的 Agent 把收藏变成带地图入口的地点护照和逐日行程。
+**把刷到的旅行灵感存起来，出发前整理成一份带图、带地图入口的地点护照。**
 
-**所有功能免费，MIT 开源。** 收藏、OCR 与视频证据、地点核实、带图护照、逐日安排、修改与撤销、迁移修复、出发前复核和导出都在一个 Skill 里。无需注册、激活、配置地图 API Key 或连接 Kornvia 服务。
+想去就出发是一个免费的中英双语 Skill。把旅行截图、链接、视频或笔记交给 Agent，它会按目的地建立本地收藏。准备出发时，可以从已存地点生成逐日路线、保留备选，并在出发前按需复核开放、预约和交通信息。
+
+[下载最新版](https://github.com/isook527/want-to-go-trip-planner/releases/latest) · [安装](#安装) · [用法示例](#可以这样说) · [English](#english) · [MIT License](LICENSE)
+
+![Skill 生成的杭州想去护照封面，显示目的地、地点数与行程天数](docs/images/hangzhou-passport-cover.webp)
+
+*以下用杭州两日游演示。收藏素材采用自制插画，图文护照和逐日行程由仓库内的 Skill 生成。*
+
+## 从收藏到出发
+
+### 1. 把原件收进想去库
+
+可以先存下一张截图或一条链接，等行程确定再整理。收藏按城市归档，保留原始截图和来源。支持识别截图里的文字和从本地视频提取画面。暂时打不开的链接可以留待补充。
+
+![杭州收藏数据示意，列出西湖苏堤、茶叶博物馆和小河直街的三张已保存原始截图](docs/images/hangzhou-library.webp)
+
+*这是根据本次入库结果制作的收藏示意。日常通过 Agent 查询收藏。*
+
+### 2. 打开带图的地点护照
+
+地点卡可显示配图、地址、收藏理由、出发提醒和地图入口。适合展示的截图会另存裁切图，纯文字截图可留作证据。HTML 护照可离线打开，点击地图搜索时需要联网。中国大陆地点使用高德地图，其他地区使用 Google Maps。
+
+![图文护照的两张地点卡，包含从收藏截图裁切的配图和高德地图搜索按钮](docs/images/hangzhou-passport-cards.webp)
+
+### 3. 把地点排进每天的行程
+
+告诉 Agent 哪些地方必去、想走多远、什么时候需要休息。路线按天编排，可以留出午休、自由活动和备选地点。证据流程支持保存路线版本、修改和撤销，也能按需做行前复核。HTML 可用浏览器另存为 PDF，还可导出 XLSX 和 ICS。
+
+![Skill 生成的杭州两日行程，第一天安排西湖与茶文化，第二天安排运河街巷](docs/images/hangzhou-itinerary.webp)
+
+## 可以这样说
+
+| 你想做什么 | 发给 Agent 的一句话 |
+| --- | --- |
+| 先收藏 | 用想去就出发收藏这三张截图，放进杭州想去库。 |
+| 看带图护照 | 用证据流程整理我的杭州收藏，生成带截图配图和地图入口的护照。 |
+| 排一个周末 | 从杭州想去库排两天，苏堤必去，午饭后留休息时间。 |
+| 改路线或复核 | 把小河直街改到第二天下午，保留原方案。出发前帮我核对开放和预约信息。 |
 
 ## 安装
 
-1. 下载 [单 Skill ZIP](dist/want-to-go-trip-planner-skill-3.0.1.zip) 并解压，或从源码复制整个 [Skill 文件夹](skills/want-to-go-trip-planner)。
-2. 将 `want-to-go-trip-planner` 文件夹放入支持本地 Skill 的 Agent（例如 Codex 的 `~/.codex/skills/`，或 Claude Code 的 `~/.claude/skills/`），重新打开 Agent。已装旧版时，请停用旧 Skill 以免重复触发。
-3. 发一张旅行截图或一条链接，说：“用想去就出发收藏这些地方。”准备好后，可以说：“从我收藏的地方里，给我排一个三天行程。每天留午休，避开太多步行。”
+1. 下载并解压 [Skill ZIP](dist/want-to-go-trip-planner-skill-3.0.1.zip)，也可以复制整个 [Skill 文件夹](skills/want-to-go-trip-planner)。
+2. 将 `want-to-go-trip-planner` 文件夹放进 Agent 的本地 Skills 目录。Codex 可放在 `~/.codex/skills/`，Claude Code 可放在 `~/.claude/skills/`。重新打开 Agent 后即可调用。
+3. 发一张旅行截图，从上面的收藏示例开始。已有收藏时，可以让 Agent 继续使用原来的库。
 
-基础流程使用 Python 3.9+ 标准库。证据流程的详细图文版需要 Node.js 18+，图片处理使用 Pillow；本地 OCR 与视频拆帧分别需要可用的 Vision/Tesseract 和 FFmpeg。平台内容能否读取由实际访问情况决定；失败时仍可保留链接和本地素材。已有 SQLite 想去库可继续使用，旧 GitHub 版的 JSON 库可用证据流程打开。迁移前先复制库和资产；两种库不会自动合并。
+| 流程 | 用途 | 环境 |
+| --- | --- | --- |
+| 本地库 | 快速收藏、查询已有 SQLite 库、地图链接和轻量行程 | Python 3.9+ |
+| 证据流程 | 带截图配图的护照、版本化 JSON 库、路线历史和行前复核 | Python 3.9+、Node.js 18+。图片处理用 Pillow，本地 OCR 和视频拆帧用可用的 Vision/Tesseract 与 FFmpeg。 |
 
-地图按钮用于地点搜索：大陆用高德，其他地区用 Google Maps，未知地区暂不生成链接。HTML 可离线查看，可打印为 PDF，也可另存 XLSX 和 ICS。行前复核按请求执行。
+Skill 免费，采用 MIT 许可证。运行时使用本地文件和 Agent 已有能力。地图搜索链接不需要配置地图 API Key。迁移旧库前先复制库文件和资产目录。旧 SQLite 库和 JSON 库各自沿用原来的流程。
 
-- [Skill 入口](skills/want-to-go-trip-planner/SKILL.md) · [证据和路线历史](skills/want-to-go-trip-planner/references/evidence-workflow.md) · [规划与导出](skills/want-to-go-trip-planner/references/planning-and-exports.md)
-- [中文样例](examples/itinerary.zh-CN.json) · [English example](examples/itinerary.en-US.json) · [MIT License](LICENSE)
+[中文工作流](skills/want-to-go-trip-planner/references/workflow.zh-CN.md) · [证据流程](skills/want-to-go-trip-planner/references/evidence-workflow.md) · [规划和导出](skills/want-to-go-trip-planner/references/planning-and-exports.md) · [中文样例](examples/itinerary.zh-CN.json)
 
 ## English
 
-Save screenshots, links, original videos and notes. Ask your agent to organize saved places, build a map-linked passport and daily itinerary, revise it, or check changes before your trip. Every feature is free and open source under MIT. No account, activation, map API key or Kornvia backend is needed.
+Want to Go is a free, MIT-licensed skill that turns travel screenshots, links, videos and notes into a local destination library, a photo-rich place passport and a day-by-day itinerary. The Hangzhou screenshots above show an example of the library data and actual passport output.
 
-Unzip the [Skill download](dist/want-to-go-trip-planner-skill-3.0.1.zip) and place the `want-to-go-trip-planner` folder in your agent’s skills directory. Try: “Use Want to Go to save these places,” then “Make me a three-day trip from my saved places, with fewer transfers and a lunch break each day.”
+Unzip the [Skill download](dist/want-to-go-trip-planner-skill-3.0.1.zip) and put the `want-to-go-trip-planner` folder in your agent’s skills directory. Try “Save these travel screenshots to my Hangzhou library,” then “Use the evidence workflow to make a photo-rich two-day passport from my saved places.”
 
-The lightweight workflow only needs Python 3.9+. The evidence workflow uses Node.js 18+ for the photo-rich HTML renderer and Pillow for image processing. OCR, video frames and platform adapters use optional local tools. See the [English workflow](skills/want-to-go-trip-planner/references/workflow.en-US.md) and [evidence workflow](skills/want-to-go-trip-planner/references/evidence-workflow.md).
+The lightweight workflow runs on Python 3.9+. The evidence workflow uses Node.js 18+ for rich HTML and Pillow for image processing. You can view the passport offline, print it to PDF, and export an XLSX or ICS file.
+
+[English workflow](skills/want-to-go-trip-planner/references/workflow.en-US.md) · [Evidence workflow](skills/want-to-go-trip-planner/references/evidence-workflow.md) · [English example](examples/itinerary.en-US.json)
 
 ## Development
 
