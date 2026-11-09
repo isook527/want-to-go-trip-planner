@@ -43,7 +43,7 @@
 
 ## 安装
 
-1. 下载并解压 [Skill ZIP](dist/want-to-go-trip-planner-skill-3.0.2.zip)，也可以复制整个 [Skill 文件夹](skills/want-to-go-trip-planner)。
+1. 下载并解压 [Skill ZIP](dist/want-to-go-trip-planner-skill-3.1.0.zip)，也可以复制整个 [Skill 文件夹](skills/want-to-go-trip-planner)。
 2. 将 `want-to-go-trip-planner` 文件夹放进 Agent 的本地 Skills 目录。Codex 可放在 `~/.codex/skills/`，Claude Code 可放在 `~/.claude/skills/`。重新打开 Agent 后即可调用。
 3. 发一张旅行截图，从上面的收藏示例开始。已有收藏时，可以让 Agent 继续使用原来的库。
 
@@ -73,7 +73,8 @@ python3 "$skill/scripts/want_to_go.py" ingest --library "$out/library.json" --ev
 python3 "$skill/scripts/want_to_go.py" promote --library "$out/library.json" --bundle-id demo-hangzhou --selections "$demo/selections.json"
 python3 "$skill/scripts/want_to_go.py" edit --library "$out/library.json" --place-id tea-museum --patch "$demo/place-patch.json"
 
-# 保存路线，生成图文护照，再导出表格和日历。
+# 先检查路线，再保存并生成图文护照、表格和日历。
+python3 "$skill/scripts/want_to_go.py" lint-route --library "$out/library.json" --destination 杭州 --plan "$demo/route.json"
 python3 "$skill/scripts/want_to_go.py" route-plan --library "$out/library.json" --destination 杭州 --plan "$demo/route.json"
 python3 "$skill/scripts/want_to_go.py" passport --library "$out/library.json" --destination 杭州 --map-region mainland --output "$out/passport.json"
 node "$skill/renderer/render_report.mjs" "$out/passport.json" "$out/passport.html"
@@ -89,7 +90,7 @@ printf '输出目录：%s\n' "$out"
 
 Want to Go is a free, MIT-licensed skill that turns travel screenshots, links, videos and notes into a local destination library, a photo-rich place passport and a day-by-day itinerary. The Hangzhou screenshots above show an example of the library data and actual passport output.
 
-Unzip the [Skill download](dist/want-to-go-trip-planner-skill-3.0.2.zip) and put the `want-to-go-trip-planner` folder in your agent’s skills directory. Try “Save these travel screenshots to my Hangzhou library,” then “Use the evidence workflow to make a photo-rich two-day passport from my saved places.”
+Unzip the [Skill download](dist/want-to-go-trip-planner-skill-3.1.0.zip) and put the `want-to-go-trip-planner` folder in your agent’s skills directory. Try “Save these travel screenshots to my Hangzhou library,” then “Use the evidence workflow to make a photo-rich two-day passport from my saved places.”
 
 The lightweight workflow runs on Python 3.9+. The evidence workflow uses Node.js 18+ for rich HTML and Pillow for image processing. You can view the passport offline, print it to PDF, and export an XLSX or ICS file.
 
@@ -100,5 +101,5 @@ The lightweight workflow runs on Python 3.9+. The evidence workflow uses Node.js
 ```bash
 python3 -m pip install Pillow
 python3 -m unittest discover -s tests
-python3 skills/want-to-go-trip-planner/scripts/build_release.py --zip dist/want-to-go-trip-planner-skill-3.0.2.zip
+python3 skills/want-to-go-trip-planner/scripts/build_release.py --zip dist/want-to-go-trip-planner-skill-3.1.0.zip
 ```

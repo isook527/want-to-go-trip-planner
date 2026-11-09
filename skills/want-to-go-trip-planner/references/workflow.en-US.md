@@ -34,6 +34,7 @@ When requested, first save any new sources and search the historical library. Re
 
 ```bash
 python3 /absolute/path/to/skill/scripts/render.py /absolute/path/passport.json /absolute/path/passport.html
+python3 /absolute/path/to/skill/scripts/want_to_go.py scan --mode customer --path /absolute/path/passport.html
 ```
 
 Input format: `{"locale":"en-US","title":"Bangkok Places Passport","city":"Bangkok","map_region":"outside_mainland","places":[{"name":"Wat Arun","address":"","hours":"","note":""}],"days":[{"title":"Day 1","visits":[{"period":"Morning","place":"Wat Arun","detail":"Visit"}]}]}`. For mixed regions set `map_region` per place. For unknown regions use `unknown` until confirmed. Each map link searches for the name, address and city and requires the traveler to confirm the right location. Deliver the HTML and input JSON and say where they were saved. The HTML can be opened offline; opening a map requires internet access.

@@ -4,6 +4,8 @@ Use the traveler’s saved and verified places first. Include city transitions, 
 
 按目的地和日期安排，保留换乘、排队、用餐及休息余量；按优先级安排，未落实的地点保留为备选。必要时补预算、住宿区域、订票和行前清单。把已核实的交通时间、预约和价格与待确认项分开。交通时间没有可靠依据时只给顺序与时段；不凭空写车次、天气、价格或预约结果。
 
+Read [itinerary quality](itinerary-quality.md) for thresholds, opening windows and the read-only route check.
+
 ## Files · 导出
 
 - **HTML**: use `scripts/render.py` for the local library, or `renderer/render_report.mjs` for the evidence workflow. To save **PDF**, use the browser’s Print → Save as PDF on the local HTML. The print styles are built in; no upload is needed.
@@ -13,9 +15,10 @@ Use the traveler’s saved and verified places first. Include city transitions, 
   python3 /absolute/path/to/skill/scripts/export_itinerary.py passport.json --xlsx itinerary.xlsx --ics itinerary.ics
   ```
 
-- **ICS dates, evidence workflow**: Set `tripProfile.startDate` in the route JSON, using a confirmed date in `YYYY-MM-DD` format. Run `route-plan` and `passport` again before exporting. The exporter calculates the remaining dates from the start date. The saved route uses the trip profile rather than per-day date inputs.
-- **ICS dates, lightweight workflow**: Set a confirmed `days[].date` in `YYYY-MM-DD` format for every day you want on the calendar. Each dated day becomes an all-day event. Undated plans can still produce HTML and XLSX. The ICS is a snapshot.
+- **ICS dates, evidence workflow**: Set `tripProfile.startDate` in the route JSON, using a confirmed date in `YYYY-MM-DD` format. Run `route-plan` and `passport` again before exporting. The exporter calculates the remaining dates from the start date. The saved route uses the trip profile for dates. Revisions keep a calendar identity and export stable day UIDs with a sequence. To create a separate trip calendar in the same destination, set a new opaque `calendarId` on the route draft.
+- **ICS dates, lightweight workflow**: Set a confirmed `days[].date` in `YYYY-MM-DD` format for every day you want on the calendar. Set an explicit, stable `calendarId`, number each day and increment `calendarSequence` on revision when dates may change. Undated plans can produce HTML and XLSX.
 
 证据流程用路线 JSON 的 `tripProfile.startDate` 推算各天日期，例如 `2030-05-10`。补日期后先保存路线，再重新生成护照 JSON。轻量流程可在每天的 `days[].date` 填写日期。
-- The spreadsheet includes the itinerary, places, transfers and trip notes. You can supply optional `trip_notes` arrays for budget, lodging, reservations, backup plans and departure checklists; entries are plain text. The spreadsheet exports only selected travel fields and never adds raw evidence or private library records.
+- ICS emits one event per dated day. A day is timed only when all stops have a verified `timing` (with `start`, `end`, IANA `timeZone` and a public HTTPS `sourceUrl`), with one usable timezone for the day. Otherwise it stays all-day. `LOCATION` uses the first place, and `URL` is included when a public map search can be generated. On systems without IANA timezone data, optionally install `tzdata` to enable timed events. Whether an app updates an existing event when importing an ICS file depends on the app.
+- The spreadsheet includes the itinerary, places, transfers and trip notes. You can supply optional `trip_notes` arrays for budget, lodging, reservations, backup plans and departure checklists; entries are plain text. Add a separate `budget` array on the route (or top-level for lightweight export). Each item has `item`, numeric `amount`, three-letter `currency` and `status` (`verified` or `estimate`). The workbook uses numeric budget and date cells, wrapped text and a frozen heading row. The spreadsheet exports only selected travel fields and never adds raw evidence or private library records.
 - Deliver each format from the same approved travel JSON. When a plan changes, regenerate requested formats together and keep an earlier confirmed copy unless the user asks for replacement.

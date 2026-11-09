@@ -14,6 +14,7 @@ import unittest
 import urllib.error
 import zipfile
 from pathlib import Path
+from datetime import datetime
 from unittest import mock
 
 from PIL import Image
@@ -2202,8 +2203,14 @@ class PublicSkillRegressionTests(unittest.TestCase):
                 }
             ],
         )
-        customer = W2G.customer_place(place, "zh-CN")
+        with mock.patch("fact_freshness.datetime", wraps=datetime) as clock:
+            clock.now.return_value = datetime.fromisoformat("2026-08-12T12:00:00+00:00")
+            customer = W2G.customer_place(place, "zh-CN")
+            clock.now.return_value = datetime.fromisoformat("2026-08-19T12:00:00+00:00")
+            expired = W2G.customer_place(place, "zh-CN")
         summary = customer["verificationSummary"]
+        self.assertEqual(expired["verificationSummary"]["status"], "stale")
+        self.assertIn("历史记录", expired["openingHoursText"])
         self.assertEqual(summary["status"], "verified")
         self.assertEqual(summary["checkedAt"], "2026-08-11T08:00:00Z")
         self.assertEqual(summary["validUntil"], "2026-08-18T08:00:00Z")
@@ -2840,7 +2847,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
         self.assertIn("Image preparation arguments", json.loads(result.stderr)["message"])
 
     def test_94_release_manifest_matches_archive_and_detects_tampering(self):
-        archive_path = ROOT / "dist" / "want-to-go-trip-planner-skill-3.0.2.zip"
+        archive_path = ROOT / "dist" / f"want-to-go-trip-planner-skill-{product_config()['version']}.zip"
         self.assertTrue(archive_path.is_file())
         with zipfile.ZipFile(archive_path) as archive:
             self.assertEqual(W2G.release_manifest_issues(archive), [])

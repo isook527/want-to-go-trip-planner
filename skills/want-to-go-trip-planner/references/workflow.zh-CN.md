@@ -55,6 +55,7 @@ python3 scripts/library.py --locale zh-CN export 曼谷 /absolute/path/passport.
 
 ```bash
 python3 scripts/render.py /absolute/path/input.json /absolute/path/output.html
+python3 scripts/want_to_go.py scan --mode customer --path /absolute/path/output.html
 ```
 
 输入格式：`{"locale":"zh-CN","title":"曼谷三日游","city":"曼谷","map_region":"outside_mainland","places":[{"name":"地点名","address":"地址或空字符串","hours":"营业信息或待确认","note":"特色或提醒"}],"days":[{"title":"第一天","visits":[{"period":"上午","place":"地点名","detail":"安排及待确认事项"}]}]}`。导出时 `--map-region mainland` 用于中国大陆，`--map-region outside_mainland` 用于大陆以外；直接构造 JSON 时填写对应 `map_region`。混合地区时可为单个地点单独设置 `map_region`。未确认时使用 `unknown`，护照不显示地图链接，确认后再生成。地点名称必填；每天的 `place` 须与地点清单名称完全一致。脚本为地点生成地图搜索链接，用户打开后核对分店。宿主支持时可另外提供 PDF 等格式。

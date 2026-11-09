@@ -298,12 +298,16 @@ function routePlanSection(plan, en) {
       <span><b>${escapeHtml(clean(stop.name, 120))}</b><small>${escapeHtml(clean(stop.timeLabel, 60))}</small></span>
     </div>`).join("")}</div>
   </article>`).join("");
+  const noteLabels = en
+    ? {lunch: "Lunch", rest: "Rest", backup: "Backup", dropIfDelayed: "Skip if delayed", tradeoff: "Trade-off"}
+    : {lunch: "午餐", rest: "休息", backup: "备选", dropIfDelayed: "超时则跳过", tradeoff: "取舍"};
   const dayCards = days.map((day) => `<article class="day-card">
     <header><span>DAY ${String(day.day || 0).padStart(2, "0")}</span><h3>${escapeHtml(clean(day.title, 140))}</h3></header>
     ${day.summary ? `<p class="day-summary">${escapeHtml(clean(day.summary, 420))}</p>` : ""}
     <ol>${(day.stops || []).map((stop) => `<li><div><span>${escapeHtml(clean(stop.timeLabel, 60))}</span><strong>${escapeHtml(clean(stop.name, 120))}</strong></div>
       ${stop.address ? `<p>${escapeHtml(clean(stop.address, 220))}</p>` : ""}
       ${stop.note ? `<p>${escapeHtml(clean(stop.note, 320))}</p>` : ""}</li>`).join("")}</ol>
+    ${Object.entries(noteLabels).some(([key]) => day[key]) ? `<dl>${Object.entries(noteLabels).filter(([key]) => day[key]).map(([key, label]) => `<dt>${label}</dt><dd>${escapeHtml(clean(day[key], 300))}</dd>`).join("")}</dl>` : ""}
     ${(day.connections || []).length ? `<div class="connections">${day.connections.map((connection) => `<p><strong>${escapeHtml(clean(connection.from, 100))} → ${escapeHtml(clean(connection.to, 100))}</strong><span>${escapeHtml(clean(connection.modeLabel, 80))}${connection.durationText ? ` · ${escapeHtml(clean(connection.durationText, 120))}` : ""} · ${escapeHtml(clean(connection.statusLabel, 80))}</span>${connection.note ? `<small>${escapeHtml(clean(connection.note, 220))}</small>` : ""}</p>`).join("")}</div>` : ""}
   </article>`).join("");
   const unassigned = Array.isArray(plan.unassigned) ? plan.unassigned : [];
@@ -325,6 +329,7 @@ function card(place, locale, baseDir, mapRegion, destination) {
   );
   const links = publicLinks(place);
   const query = [place.displayName || place.name, place.branch, place.address || place.positionText, destination].filter(Boolean).join(" ");
+  mapRegion = ["mainland", "outside_mainland", "unknown"].includes(place.mapRegion) ? place.mapRegion : mapRegion;
   const mapSearch = mapRegion === "mainland"
     ? `https://uri.amap.com/search?${new URLSearchParams({keyword: query})}`
     : mapRegion === "outside_mainland"

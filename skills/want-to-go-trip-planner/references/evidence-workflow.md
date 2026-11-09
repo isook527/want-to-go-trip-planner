@@ -27,14 +27,32 @@ This workflow uses a versioned JSON library and a sibling asset directory. Use i
 
 ## Passport, maps and edits · 护照、地图和修改
 
-Create one plan per destination with `route-plan --library want-to-go.json --destination "Example City" --plan route.json --locale en-US --operation-id UNIQUE_ID`. Use the schema’s `routePlan` example for `tripProfile`, `days[].stops`, `connections` and `unassigned`. Include each deliverable place once or explicitly leave it unassigned, with a reason. Put every confirmed must-visit place in the schedule. Do not fabricate connection times or distances. The schematic route shows sequence, not live navigation.
+Create one plan per destination with `route-plan --library want-to-go.json --destination "Example City" --plan route.json --locale en-US --operation-id UNIQUE_ID`. Run the read-only `lint-route` first and resolve or explain its warnings using [itinerary quality](itinerary-quality.md). Use the schema’s `routePlan` example for `tripProfile`, `days[].stops`, `connections` and `unassigned`. Include each deliverable place once or explicitly leave it unassigned, with a reason. Put every confirmed must-visit place in the schedule. Do not fabricate connection times or distances. The schematic route shows sequence, not live navigation.
 
 Run `passport --library want-to-go.json --destination "Example City" --output passport.json --locale en-US --map-region outside_mainland`. Use `mainland` or `unknown` where appropriate. Use `--places-only` for a rich place passport without an itinerary, `--content-depth compact|standard|deep` to change detail, or `--visitor-mode` for the public projection. Run `node renderer/render_report.mjs passport.json passport.html` and `want_to_go.py scan --path passport.html --mode customer`. Public source links must be safe HTTPS links and must omit credential-like parameters. HTML embeds approved display images and opens offline; external links require internet.
 
-Use `list`, `present`, `destination-alias`, `edit`, `delete` (soft deletion), `restore` and `reorder`. Always use a unique `--operation-id` for a new change. Use `undo --library want-to-go.json --operation-id THE_ORIGINAL_ID` to undo the specific supported change. Saving a new route archives the prior route; it does not erase original evidence. For migrations, run `migrate --dry-run` first and prefer `--output` to keep the original. Run `validate` and `repair --dry-run` before repair. Hash mismatches and dangling references must be resolved rather than ignored. `export` copies the library for private portability; `share` directs the user to the traveler-facing HTML. Copy the asset directory alongside the JSON when migrating to another device.
+Use `list`, `present`, `destination-alias`, `edit`, `delete` (soft deletion), `restore` and `reorder`. Always use a unique `--operation-id` for a new change. Use `undo --library want-to-go.json --operation-id NEW_UNDO_ID` to undo the latest supported change. Add `--event-id EVENT_ID` to select a specific event where permitted. Saving a new route archives the prior route; it does not erase original evidence. For migrations, run `migrate --dry-run` first and prefer `--output` to keep the original. Run `validate` and `repair --dry-run` before repair. Hash mismatches and dangling references must be resolved rather than ignored. `export` copies the library for private portability; `share` directs the user to the traveler-facing HTML. Copy the asset directory alongside the JSON when migrating to another device.
 
-## One-time pre-trip review · 单次行前复核
+## Pre-trip review · 行前复核
 
-On the agreed date, verify branch identity, openings, reservations, temporary closures, cross-area transfers, walking load, accessible options and time trade-offs. If a source cannot substantiate a fact, mark it unverified. Provide `agreedReviewDate`, `agreementConfirmed: true`, `checkedAt` on the agreed date, and `items` with place IDs and auditable `factAudits`. A verified/conflicting/stale/not-found fact needs a timestamp and an actual official or reliable public source. Put trip-wide risks in `tripRisks`. The schema example shows the structure.
+Run `want_to_go.py review-schedule --library want-to-go.json --destination "Example City"` once the active route has a `tripProfile.startDate`. Show the dates to the traveler and agree which checks to run.
 
-Run `want_to_go.py review --library want-to-go.json --destination "Example City" --checks checks.json --operation-id UNIQUE_ID`. Compare the change list and propose a revised route where needed. Leave previous plans and snapshot files intact unless the user explicitly asks for replacement. No background scheduling is required.
+| Node | Checks |
+| --- | --- |
+| T-7 | Opening hours, reservation rules and prices |
+| T-3 | Weather, transit schedules and last services |
+| T-1 | Final check of closures, tickets, price changes, weather and transport |
+
+At each agreed check, supply `node` (`T-7`, `T-3` or `T-1`), `agreedReviewDate`, `agreementConfirmed: true`, and `checkedAt` with the local offset on that date. For a custom date, omit `node`. A repeat for the same trip, date and node keeps the original snapshot. A saved route revision keeps its calendar identity. A change to its departure date starts a separate review timeline.
+
+Include `items` for the places checked. Use `facts` for what changed and `factAudits` for status and sources. A reviewed fact needs a timestamp and an official or reliable public source. Add trip-wide issues to `tripRisks`. For blocking evidence, use explicit values such as `openingStatus: "closed"`, `reservationStatus: "sold_out"`, or a verified risk with `severity: "blocking"`. Unverified blocking claims are returned as adjustments to check.
+
+```bash
+python3 scripts/want_to_go.py review --library want-to-go.json --destination "Example City" --checks checks.json
+```
+
+Compare the results with the preceding completed review. The CLI groups changes into `blocking`, `adjust` and `info`, and returns a checklist for travel documents, reservation confirmations, offline maps and addresses in the local language. A node may check only the fields relevant to its date. The passport retains earlier audited fields and flags expiry. Keep earlier snapshots and route versions. Run checks when the traveler asks on the agreed day. The Skill does not monitor in the background or make bookings.
+
+中文使用时，先让旅行者确认节点日期，再按约定日执行。`blocking` 是已核实且影响成行的变更，`adjust` 是需要改安排或继续核对的事项，`info` 是提示。说明对路线的影响，并带上出发清单。
+
+See [fact freshness](place-resolution.md#fact-freshness--事实时效) for expiry rules.

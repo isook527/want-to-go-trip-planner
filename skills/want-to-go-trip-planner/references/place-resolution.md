@@ -70,3 +70,17 @@
 - Business places require confirmed name, address, opening hours, reason and departure reminder. Venues require real opening information. Public spaces may state that individual tenants keep their own hours. A saved `placeType: route` requires a start/end or at least two waypoints, duration, highlight and departure reminder; it is distinct from the generated multi-place `routePlan`.
 - A `routePlan` must assign every passport-ready place exactly once or list it explicitly as unassigned, and must include every must-go place. Its schematic map does not prove live traffic, future hours, queues, reservations or human review.
 - Keep incomplete places in the library and count them in `retainedClueCount`; do not block complete places.
+
+
+## Fact freshness · 事实时效
+
+| Fact | Maximum validity after `checkedAt` |
+| --- | --- |
+| Weather and forecasts | 72 hours |
+| Opening hours, closures and reservation rules | 7 days |
+| Timetables, last services and traffic | 3 days |
+| Prices and fees | 7 days, with a final recheck before departure |
+
+The script derives `validUntil` for these fields. An earlier expiry from the source wins. For other fields, supply a source-specific `validUntil` when applicable. Use an ISO date or a timezone-aware timestamp. A date-only expiry is inclusive through the end of that UTC date. Passport and review output treat an expired `verified` fact as `stale`. The original evidence and the status observed at the time of a historical review remain available.
+
+中文约定：开放、预约、临时闭馆优先在 T-7 核对，交通与天气在 T-3 核对，价格和可能影响成行的信息在 T-1 再查。

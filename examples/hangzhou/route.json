@@ -10,6 +10,10 @@
     {
       "day": 1,
       "title": "茶文化与山色",
+      "lunch": "中午先用餐，下午再去博物馆。",
+      "rest": "参观后留一段休息时间。",
+      "backup": "遇雨或体力不足时，只安排室内展览，出发前先确认展馆开放。",
+      "dropIfDelayed": "若入馆排队超过预期，取消茶园散步。",
       "stops": [
         {"placeId": "tea-museum", "timeBlock": "afternoon", "note": "先核对预约再出发。"}
       ]

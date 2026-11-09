@@ -338,6 +338,13 @@
         },
         "nextAction": {
           "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "blocking",
+            "adjust",
+            "info"
+          ]
         }
       },
       "additionalProperties": false
@@ -606,6 +613,16 @@
         },
         "updatedAt": {
           "$ref": "#/$defs/timestamp"
+        },
+        "openingHours": {
+          "$ref": "#/$defs/openingHoursValue"
+        },
+        "mapRegion": {
+          "enum": [
+            "mainland",
+            "outside_mainland",
+            "unknown"
+          ]
         }
       },
       "additionalProperties": true
@@ -823,6 +840,24 @@
         "note": {
           "type": "string",
           "maxLength": 500
+        },
+        "major": {
+          "type": "boolean"
+        },
+        "reservationRequired": {
+          "type": "boolean"
+        },
+        "reservationStatus": {
+          "enum": [
+            "unknown",
+            "pending",
+            "confirmed",
+            "unavailable",
+            "not_required"
+          ]
+        },
+        "timing": {
+          "$ref": "#/$defs/routeTiming"
         }
       },
       "additionalProperties": false
@@ -830,8 +865,6 @@
     "routeConnection": {
       "type": "object",
       "required": [
-        "fromPlaceId",
-        "toPlaceId",
         "mode",
         "status"
       ],
@@ -852,6 +885,7 @@
             "boat",
             "taxi",
             "drive",
+            "flight",
             "flexible"
           ]
         },
@@ -871,9 +905,111 @@
         "note": {
           "type": "string",
           "maxLength": 300
+        },
+        "intercity": {
+          "type": "boolean"
+        },
+        "fromLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "toLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "durationMinutes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1440
+        },
+        "distanceMeters": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20000000
+        },
+        "tradeoff": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "checkedAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date"
+            },
+            {
+              "$ref": "#/$defs/timestamp"
+            }
+          ]
+        },
+        "validUntil": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date"
+            },
+            {
+              "$ref": "#/$defs/timestamp"
+            }
+          ]
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "intercity": {
+                "const": true
+              }
+            },
+            "required": [
+              "intercity"
+            ]
+          },
+          "then": {
+            "allOf": [
+              {
+                "anyOf": [
+                  {
+                    "required": [
+                      "fromPlaceId"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "fromLabel"
+                    ]
+                  }
+                ]
+              },
+              {
+                "anyOf": [
+                  {
+                    "required": [
+                      "toPlaceId"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "toLabel"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "else": {
+            "required": [
+              "fromPlaceId",
+              "toPlaceId"
+            ]
+          }
+        }
+      ]
     },
     "routeDay": {
       "type": "object",
@@ -909,6 +1045,36 @@
           "items": {
             "$ref": "#/$defs/routeConnection"
           }
+        },
+        "lunch": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "rest": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "backup": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "dropIfDelayed": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "tradeoff": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "onsiteWalkingMeters": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 200000
         }
       },
       "additionalProperties": false
@@ -962,6 +1128,29 @@
         "pace": {
           "type": "string",
           "maxLength": 120
+        },
+        "reducedMobility": {
+          "type": "boolean"
+        },
+        "walkingLimitMeters": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 200000
+        },
+        "maxMajorStops": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "maxTransferMinutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1440
+        },
+        "maxDailyTransferMinutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1440
         }
       },
       "additionalProperties": false
@@ -1073,6 +1262,16 @@
         },
         "updatedAt": {
           "$ref": "#/$defs/timestamp"
+        },
+        "budget": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/budgetItem"
+          }
+        },
+        "calendarId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,100}$"
         }
       },
       "additionalProperties": false
@@ -1101,6 +1300,7 @@
         "trigger": {
           "enum": [
             "agreed_date_once",
+            "agreed_trip_node",
             "pre_trip_on_demand_legacy"
           ]
         },
@@ -1148,6 +1348,59 @@
         },
         "summary": {
           "type": "string"
+        },
+        "node": {
+          "enum": [
+            "T-7",
+            "T-3",
+            "T-1"
+          ]
+        },
+        "tripStartDate": {
+          "type": "string",
+          "format": "date"
+        },
+        "calendarId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "departureChecklist": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          }
+        },
+        "changeGroups": {
+          "type": "object",
+          "properties": {
+            "blocking": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "adjust": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "info": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            }
+          },
+          "required": [
+            "blocking",
+            "adjust",
+            "info"
+          ],
+          "additionalProperties": false
         }
       },
       "allOf": [
@@ -1183,6 +1436,27 @@
           "then": {
             "required": [
               "legacyImported"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "trigger": {
+                "const": "agreed_trip_node"
+              }
+            },
+            "required": [
+              "trigger"
+            ]
+          },
+          "then": {
+            "required": [
+              "node",
+              "agreedReviewDate",
+              "agreementConfirmed",
+              "tripStartDate",
+              "calendarId"
             ]
           }
         }
@@ -1282,6 +1556,308 @@
         }
       },
       "additionalProperties": false
+    },
+    "structuredOpeningHours": {
+      "type": "object",
+      "properties": {
+        "weeklyHours": {
+          "type": "object",
+          "properties": {
+            "mon": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "open": {
+                    "type": "string",
+                    "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+                  },
+                  "close": {
+                    "type": "string",
+                    "pattern": "^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9]|24:00)$"
+                  }
+                },
+                "required": [
+                  "open",
+                  "close"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "tue": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "open": {
+                    "type": "string",
+                    "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+                  },
+                  "close": {
+                    "type": "string",
+                    "pattern": "^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9]|24:00)$"
+                  }
+                },
+                "required": [
+                  "open",
+                  "close"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "wed": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "open": {
+                    "type": "string",
+                    "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+                  },
+                  "close": {
+                    "type": "string",
+                    "pattern": "^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9]|24:00)$"
+                  }
+                },
+                "required": [
+                  "open",
+                  "close"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "thu": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "open": {
+                    "type": "string",
+                    "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+                  },
+                  "close": {
+                    "type": "string",
+                    "pattern": "^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9]|24:00)$"
+                  }
+                },
+                "required": [
+                  "open",
+                  "close"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "fri": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "open": {
+                    "type": "string",
+                    "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+                  },
+                  "close": {
+                    "type": "string",
+                    "pattern": "^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9]|24:00)$"
+                  }
+                },
+                "required": [
+                  "open",
+                  "close"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "sat": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "open": {
+                    "type": "string",
+                    "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+                  },
+                  "close": {
+                    "type": "string",
+                    "pattern": "^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9]|24:00)$"
+                  }
+                },
+                "required": [
+                  "open",
+                  "close"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "sun": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "open": {
+                    "type": "string",
+                    "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+                  },
+                  "close": {
+                    "type": "string",
+                    "pattern": "^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9]|24:00)$"
+                  }
+                },
+                "required": [
+                  "open",
+                  "close"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "closedDays": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "mon",
+              "tue",
+              "wed",
+              "thu",
+              "fri",
+              "sat",
+              "sun"
+            ]
+          }
+        },
+        "lastEntry": {
+          "type": "string",
+          "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+        },
+        "reservationLeadDays": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 365
+        }
+      },
+      "additionalProperties": false
+    },
+    "routeTiming": {
+      "type": "object",
+      "properties": {
+        "start": {
+          "type": "string",
+          "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+        },
+        "end": {
+          "type": "string",
+          "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+        },
+        "timeZone": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_+/-]{1,100}$"
+        },
+        "status": {
+          "enum": [
+            "verified",
+            "unverified"
+          ]
+        },
+        "sourceUrl": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "timeZone",
+        "status"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "verified"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "sourceUrl"
+            ]
+          }
+        }
+      ]
+    },
+    "budgetItem": {
+      "type": "object",
+      "properties": {
+        "item": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "amount": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1000000000000.0
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        },
+        "status": {
+          "enum": [
+            "verified",
+            "estimate"
+          ]
+        }
+      },
+      "required": [
+        "item",
+        "amount",
+        "currency",
+        "status"
+      ],
+      "additionalProperties": false
+    },
+    "openingHoursValue": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/structuredOpeningHours"
+        },
+        {
+          "type": "object",
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "weeklyHours"
+                ]
+              },
+              {
+                "required": [
+                  "closedDays"
+                ]
+              },
+              {
+                "required": [
+                  "lastEntry"
+                ]
+              },
+              {
+                "required": [
+                  "reservationLeadDays"
+                ]
+              }
+            ]
+          }
+        }
+      ]
     }
   },
   "examples": [

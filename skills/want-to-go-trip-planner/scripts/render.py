@@ -6,6 +6,8 @@ import sys
 from pathlib import Path
 from urllib.parse import urlencode
 
+from want_to_go import text_scan_issues
+
 def esc(value):
     return html.escape(str(value or ""), quote=True)
 
@@ -86,6 +88,9 @@ def main():
     with source.open(encoding="utf-8") as file:
         data = json.load(file)
     output = render(data)
+    issues = text_scan_issues(output, "customer")
+    if issues:
+        raise ValueError("customer scan failed: " + ", ".join(issues))
     target.write_text(output, encoding="utf-8")
     print(f"已生成：{target}")
 

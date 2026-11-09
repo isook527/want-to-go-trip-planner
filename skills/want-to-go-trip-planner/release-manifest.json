@@ -1,10 +1,10 @@
 {
   "schemaVersion": "kornvia-skill-release-manifest-1",
   "packageName": "want-to-go-trip-planner",
-  "packageVersion": "3.0.2",
+  "packageVersion": "3.1.0",
   "contractVersion": "2.4.0",
   "rootDirectory": "want-to-go-trip-planner",
-  "fileCount": 26,
+  "fileCount": 29,
   "files": [
     {
       "path": "LICENSE",
@@ -13,8 +13,8 @@
     },
     {
       "path": "SKILL.md",
-      "size": 3765,
-      "sha256": "f87b134361f3adbc452abfced36a06e0169a8c2c2fd769dd9a980c1f8721817d"
+      "size": 4321,
+      "sha256": "4f26326c9a30ed6f62e2d468d5e1916fd52bffa1d57ee50f7d833b23f2384037"
     },
     {
       "path": "agents/openai.yaml",
@@ -24,22 +24,27 @@
     {
       "path": "config/product.json",
       "size": 6420,
-      "sha256": "11e2024cc3bc676ddef771f3b2d7858f5708cea87bb0b31f4244797f01c8fa22"
+      "sha256": "e70c991cc7684ba8a79364d921c406fb8b31435a769fc640a2458075338c8e3c"
     },
     {
       "path": "references/evidence-workflow.md",
-      "size": 6039,
-      "sha256": "899178dc52681d7dcecd52bfe6bfac35c28107480abf30bcf438812310cacfa7"
+      "size": 7574,
+      "sha256": "1e8ebe481ae4af8aba31d26e034560e98078bbd0e8cf6988a77c968d8ec55a80"
+    },
+    {
+      "path": "references/itinerary-quality.md",
+      "size": 3878,
+      "sha256": "4adc5f7ec66288898f9f082c5513134d017c1f92bac752eece8b22e314a85ce0"
     },
     {
       "path": "references/place-resolution.md",
-      "size": 4573,
-      "sha256": "909a5273a113186ef570717d3d7abb64f6b366ef634ff12cd642d869d13ef037"
+      "size": 5488,
+      "sha256": "3c26e88bacbef4dd8e04cad0d8c1112d521e751e9e0e9fb01d5afc1bf4a6a4a7"
     },
     {
       "path": "references/planning-and-exports.md",
-      "size": 3077,
-      "sha256": "850d23bc0ccbad15fb9f6545234106d69ca381cf745e2642f010ceb6da0d32a8"
+      "size": 4193,
+      "sha256": "8f36266e5ad03738e0ad527e4d562a274eeb525c137d8c55a6ab76b6c40addd6"
     },
     {
       "path": "references/provider-support.md",
@@ -48,18 +53,18 @@
     },
     {
       "path": "references/shared-data-contract-v2.schema.json",
-      "size": 34332,
-      "sha256": "b2d82c58966456055ea498c4147444b9c1ebe7e3c79322b1c5fc2439a248d63c"
+      "size": 48367,
+      "sha256": "06980f82820f8e54d40ddd9017513ffade67ebcf11ab584e504ee4779699aca1"
     },
     {
       "path": "references/workflow.en-US.md",
-      "size": 7049,
-      "sha256": "4a2c38be45081fd9f618581ba5495c5b1a2800678066c669c7481f75874d97b3"
+      "size": 7160,
+      "sha256": "131a11bf6f5663070ba074f11123bb031532bcf5d87b8877188061b6958de405"
     },
     {
       "path": "references/workflow.zh-CN.md",
-      "size": 9747,
-      "sha256": "3951d90074ad954b9a17440b9e4566ac84a351accb27e27a311927d5b03e5272"
+      "size": 9832,
+      "sha256": "0668d8aee0750711fd3cf1690f99d22a15e66d513df57a77c2af6c3e80daa2bd"
     },
     {
       "path": "renderer/kornvia-brand.mjs",
@@ -68,8 +73,8 @@
     },
     {
       "path": "renderer/render_report.mjs",
-      "size": 28145,
-      "sha256": "2017a9e5da1584044988ca9a1c2c3b834d9db90dabebd0caa498f9f7f4c6b5f4"
+      "size": 28741,
+      "sha256": "e5e5654a0fca5f39637d6c8b52dc5a5df971e6bff4441bff3cf541707fbc0529"
     },
     {
       "path": "scripts/build_release.py",
@@ -88,13 +93,18 @@
     },
     {
       "path": "scripts/export_itinerary.py",
-      "size": 9394,
-      "sha256": "90cea90a2d210f8d7baaffa75e1bb3b5dbabfcc2f03a96b59afc3f57b7cda0fe"
+      "size": 17887,
+      "sha256": "1be3dcba52b38d687b5d9de7633ecb99623a25e6c16a7ce75a9f5916f2b11003"
     },
     {
       "path": "scripts/extract_evidence.py",
       "size": 106564,
       "sha256": "ed22e8b789e0fd19c6b05ce01148acc473a73d365d59a129437db954330b9c93"
+    },
+    {
+      "path": "scripts/fact_freshness.py",
+      "size": 2513,
+      "sha256": "f499d9730dc8f5f5441347a9d63791472403f1fceda37a0d54290cc77e0f6cff"
     },
     {
       "path": "scripts/library.py",
@@ -123,13 +133,18 @@
     },
     {
       "path": "scripts/render.py",
-      "size": 6635,
-      "sha256": "11028f4dadb8230b77781e8fd2b75581450b0c8d48ae20537b61594172cddde2"
+      "size": 6812,
+      "sha256": "815f13b59c363c549c136d9bc329b8a491bab0f4408fb5f42ba264bb5f09f2bf"
+    },
+    {
+      "path": "scripts/route_quality.py",
+      "size": 10570,
+      "sha256": "5cdda8fd03de18caaeb70377bbe6b40aac5d166d5230c15d7c21e422501522d3"
     },
     {
       "path": "scripts/want_to_go.py",
-      "size": 175470,
-      "sha256": "b08b7d35647c9f18c82ed474758a42797de7e52956685858272efb4828f8b2af"
+      "size": 195886,
+      "sha256": "d8c5d814d48c847a17774d4fd87f36e763def0f615c69f5b06db7a7b7da92cc4"
     },
     {
       "path": "scripts/windows_acl.py",

@@ -22,10 +22,15 @@ import unicodedata
 import uuid
 import zipfile
 from contextlib import contextmanager
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterator, Optional, Union
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+from fact_freshness import instant, with_freshness
+from route_quality import (
+    DAY_NOTES, WEEKDAYS, bounded_int, connection_status, lint_route, normalize_budget, normalize_opening_hours, normalize_timing,
+)
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "product.json"
 CONTRACT_PATH = Path(__file__).resolve().parent.parent / "references" / "shared-data-contract-v2.schema.json"
@@ -95,7 +100,7 @@ MISSING_FIELD_LABELS_EN = {
 }
 FACT_AUDIT_STATUSES = {"unverified", "verified", "conflict", "not_found", "stale"}
 ROUTE_TIME_BLOCKS = {"morning", "midday", "afternoon", "evening", "flexible"}
-ROUTE_TRANSPORT_MODES = {"walk", "transit", "rail", "boat", "taxi", "drive", "flexible"}
+ROUTE_TRANSPORT_MODES = {"walk", "transit", "rail", "boat", "taxi", "drive", "flight", "flexible"}
 ROUTE_REVIEW_STATUSES = {"not_reviewed", "human_reviewed"}
 FACT_AUDIT_PRIORITY = {
     "verified": 0,
@@ -162,7 +167,7 @@ AUDIT_SOURCE_KINDS = {"official", "reliable_public"}
 EDITABLE_PLACE_FIELDS = {
     "name", "verifiedName", "localName", "placeType", "category", "categoryLabel",
     "branch", "branchName", "address", "addressText", "positionText", "openingHoursText",
-    "openingHours", "signature", "reason", "whyGo", "highlight", "visitTip", "reminder",
+    "openingHours", "mapRegion", "signature", "reason", "whyGo", "highlight", "visitTip", "reminder",
     "departureReminder", "departureTip", "routeStart", "routeEnd", "waypoints",
     "suggestedDuration", "durationText", "destination", "displayMediaId",
 }
@@ -918,7 +923,7 @@ def normalize_fact_audit(raw: Any, checked_at_default: str = "", strict: bool = 
         result["checkedAt"] = checked_at
     if valid_until:
         result["validUntil"] = valid_until
-    return result
+    return with_freshness(result, as_of=instant(checked_at_default) or instant(checked_at), strict=strict)
 
 
 def legacy_fact_audit(raw: Any, checked_at_default: str = "") -> dict[str, Any]:
@@ -976,11 +981,17 @@ def normalize_execution_risk(raw: Any, checked_at_default: str = "", strict: boo
         "cannotProve": cannot_prove,
         "nextAction": next_action,
     }
+    if "severity" in raw:
+        if raw["severity"] not in ("blocking", "adjust", "info"):
+            if strict:
+                raise ValueError("severity must be blocking, adjust or info")
+        else:
+            result["severity"] = raw["severity"]
     if checked_at:
         result["checkedAt"] = checked_at
     if valid_until:
         result["validUntil"] = valid_until
-    return result
+    return with_freshness(result, as_of=instant(checked_at_default) or instant(checked_at), strict=strict)
 
 
 def customer_verification_summary(place: dict[str, Any], locale: str) -> dict[str, Any]:
@@ -990,7 +1001,7 @@ def customer_verification_summary(place: dict[str, Any], locale: str) -> dict[st
     audits = [
         normalized
         for item in (place.get("detailLookupAudit") or [])
-        if (normalized := normalize_fact_audit(item))
+        if (normalized := with_freshness(normalize_fact_audit(item)))
     ]
     if not audits:
         return {
@@ -1016,6 +1027,7 @@ def customer_verification_summary(place: dict[str, Any], locale: str) -> dict[st
     items = []
     for audit in audits:
         item = {
+            "field": audit["field"],
             "label": labels.get(audit["field"], audit["field"]),
             "status": audit["status"],
             "statusLabel": status_labels[audit["status"]],
@@ -1050,7 +1062,7 @@ def customer_execution_risks(raw: Any, locale: str) -> list[dict[str, Any]]:
     status_labels = FACT_STATUS_LABELS_EN if en else FACT_STATUS_LABELS_ZH
     result: list[dict[str, Any]] = []
     for item in raw if isinstance(raw, list) else []:
-        normalized = normalize_execution_risk(item)
+        normalized = with_freshness(normalize_execution_risk(item))
         if not normalized:
             continue
         customer = {
@@ -1216,11 +1228,37 @@ def customer_place(
     media_by_id: Optional[dict[str, dict[str, Any]]] = None,
 ) -> dict[str, Any]:
     place_type = normalized_place_type(place)
-    hours = first(place, "openingHoursText", "openingHours")
+    hours = first(place, "openingHoursText")
+    structured = place.get("openingHours")
+    if not hours and isinstance(structured, dict):
+        try:
+            normalize_opening_hours(structured)
+            en = locale.startswith("en")
+            labels = dict(zip(WEEKDAYS, WEEKDAYS if en else ("周一", "周二", "周三", "周四", "周五", "周六", "周日")))
+            parts = []
+            for weekday in WEEKDAYS:
+                windows = (structured.get("weeklyHours") or {}).get(weekday)
+                if weekday in (structured.get("closedDays") or []) or windows == []:
+                    parts.append(f"{labels[weekday]} {'Closed' if en else '闭馆'}")
+                elif windows:
+                    parts.append(labels[weekday] + " " + ", ".join(f"{w['open']}–{w['close']}" for w in windows))
+            if structured.get("lastEntry"):
+                parts.append(("Last entry " if en else "最晚入场 ") + structured["lastEntry"])
+            hours = " · ".join(parts) or first(structured, "text", "displayText")
+        except ValueError:
+            pass
+    elif not hours:
+        hours = first(place, "openingHours")
     if not hours and place_type == "business" and audit_allows_hours_fallback(place):
         hours = BUSINESS_HOURS_FALLBACK_EN if locale.startswith("en") else BUSINESS_HOURS_FALLBACK_ZH
     if not hours and place_type == "public_space":
         hours = PUBLIC_SPACE_HOURS_EN if locale.startswith("en") else PUBLIC_SPACE_HOURS_ZH
+
+    verification = customer_verification_summary(place, locale)
+    if hours and any(item["status"] == "stale" and item.get("field") in {"openingHours", "openingHoursText", "openingStatus"}
+                     for item in verification["items"]):
+        suffix = "Last recorded; recheck before visiting" if locale.startswith("en") else "历史记录，出发前复核"
+        hours = f"{hours} ({suffix})"
 
     result = {
         "id": text(place.get("id")),
@@ -1232,6 +1270,7 @@ def customer_place(
         "address": first(place, "address", "addressText"),
         "positionText": first(place, "positionText"),
         "openingHoursText": hours,
+        "mapRegion": place.get("mapRegion") if place.get("mapRegion") in ("mainland", "outside_mainland", "unknown") else "",
         "signature": first(place, "signature", "reason", "whyGo", "highlight"),
         "visitTip": first(place, "visitTip", "reminder", "departureReminder", "departureTip"),
         "routeStart": first(place, "routeStart"),
@@ -1240,13 +1279,13 @@ def customer_place(
         "suggestedDuration": first(place, "suggestedDuration", "durationText"),
         "photo": customer_photo(place, media_by_id),
         "originalSourceLinks": customer_source_links(place.get("originalSourceLinks") or []),
-        "verificationSummary": customer_verification_summary(place, locale),
+        "verificationSummary": verification,
         "executionRisks": customer_execution_risks(place.get("executionRisks"), locale),
     }
     if content_depth == "compact":
         allowed = {
             "id", "name", "placeType", "category", "address", "positionText",
-            "openingHoursText", "visitTip", "photo", "originalSourceLinks",
+            "openingHoursText", "visitTip", "photo", "originalSourceLinks", "mapRegion",
             "verificationSummary", "executionRisks",
         }
         result = {key: value for key, value in result.items() if key in allowed}
@@ -1329,8 +1368,8 @@ def normalize_route_plan(
         try:
             if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", start_date):
                 raise ValueError
-            date.fromisoformat(start_date)
-        except ValueError:
+            date.fromisoformat(start_date) + timedelta(days=trip_days - 1)
+        except (ValueError, OverflowError):
             raise ValueError("ROUTE_START_DATE_INVALID: tripProfile.startDate must be a valid YYYY-MM-DD date") from None
     party_size = int(profile_raw.get("partySize", 0) or 0)
     if party_size and not 1 <= party_size <= 99:
@@ -1353,6 +1392,17 @@ def normalize_route_plan(
         "pace": text(profile_raw.get("pace"))[:120],
     }
     profile = {key: value for key, value in profile.items() if value not in ("", 0, [])}
+    for field, maximum in (("walkingLimitMeters", 200000), ("maxMajorStops", 20),
+                           ("maxTransferMinutes", 1440), ("maxDailyTransferMinutes", 1440)):
+        value = bounded_int(profile_raw, field, maximum)
+        if value is not None:
+            if value == 0 and field != "walkingLimitMeters":
+                raise ValueError(f"{field} must be positive")
+            profile[field] = value
+    if "reducedMobility" in profile_raw:
+        if type(profile_raw["reducedMobility"]) is not bool:
+            raise ValueError("reducedMobility must be boolean")
+        profile["reducedMobility"] = profile_raw["reducedMobility"]
 
     days_raw = raw.get("days")
     if not isinstance(days_raw, list) or len(days_raw) != trip_days:
@@ -1376,11 +1426,21 @@ def normalize_route_plan(
             if time_block not in ROUTE_TIME_BLOCKS:
                 raise ValueError("route stop has an invalid timeBlock")
             assigned.append(place_id)
-            stops.append({
-                "placeId": place_id,
-                "timeBlock": time_block,
-                "note": text(stop_raw.get("note"))[:500],
-            })
+            stop = {"placeId": place_id, "timeBlock": time_block, "note": text(stop_raw.get("note"))[:500]}
+            for field in ("major", "reservationRequired"):
+                if field in stop_raw:
+                    if type(stop_raw[field]) is not bool:
+                        raise ValueError(f"{field} must be boolean")
+                    stop[field] = stop_raw[field]
+            if "reservationStatus" in stop_raw:
+                status = stop_raw["reservationStatus"]
+                if status not in ("unknown", "pending", "confirmed", "unavailable", "not_required"):
+                    raise ValueError("invalid reservationStatus")
+                stop["reservationStatus"] = status
+            timing = normalize_timing(stop_raw.get("timing"))
+            if timing:
+                stop["timing"] = timing
+            stops.append(stop)
         if len(assigned) != len(set(assigned)):
             raise ValueError("a place can appear only once across route days")
         day_place_ids = {item["placeId"] for item in stops}
@@ -1393,22 +1453,55 @@ def normalize_route_plan(
                 raise ValueError("route connection must be an object")
             from_id = text(connection_raw.get("fromPlaceId"))
             to_id = text(connection_raw.get("toPlaceId"))
-            if from_id not in day_place_ids or to_id not in day_place_ids or from_id == to_id:
-                raise ValueError("route connection endpoints must be different stops in the same day")
             mode = text(connection_raw.get("mode")) or "flexible"
             if mode not in ROUTE_TRANSPORT_MODES:
                 raise ValueError("route connection has an invalid mode")
+            from_label = text(connection_raw.get("fromLabel"))[:160]
+            to_label = text(connection_raw.get("toLabel"))[:160]
+            intercity = connection_raw.get("intercity", mode == "flight")
+            if type(intercity) is not bool:
+                raise ValueError("intercity must be boolean")
+            if not intercity and (from_id not in day_place_ids or to_id not in day_place_ids or from_id == to_id):
+                raise ValueError("route connection endpoints must be different stops in the same day")
+            if intercity and (
+                (from_id and from_id not in day_place_ids) or (to_id and to_id not in day_place_ids)
+                or not (from_id or from_label) or not (to_id or to_label)
+                or (from_id or from_label) == (to_id or to_label)
+            ):
+                raise ValueError("intercity connections need distinct same-day stops or endpoint labels")
             status = text(connection_raw.get("status")) or "unverified"
             if status not in FACT_AUDIT_STATUSES:
                 raise ValueError("route connection has an invalid status")
-            connections.append({
+            connection = {
                 "fromPlaceId": from_id,
                 "toPlaceId": to_id,
                 "mode": mode,
                 "durationText": text(connection_raw.get("durationText"))[:160],
                 "status": status,
                 "note": text(connection_raw.get("note"))[:300],
-            })
+                "tradeoff": text(connection_raw.get("tradeoff"))[:300],
+            }
+            for field in ("checkedAt", "validUntil"):
+                if field in connection_raw:
+                    value = connection_raw[field]
+                    if not instant(value, end_of_day=(field == "validUntil")):
+                        raise ValueError(f"connection {field} must be an ISO date or timezone-aware timestamp")
+                    connection[field] = value
+            if "checkedAt" in connection or "validUntil" in connection:
+                audit = with_freshness({**connection, "field": "transport"}, as_of=instant(connection.get("checkedAt")), strict=True)
+                if audit.get("validUntil"):
+                    connection["validUntil"] = audit["validUntil"]
+            if intercity:
+                connection.update(intercity=True, fromLabel=from_label, toLabel=to_label)
+            for field, maximum in (("durationMinutes", 1440), ("distanceMeters", 20000000)):
+                value = bounded_int(connection_raw, field, maximum)
+                if value is not None:
+                    connection[field] = value
+            key = (from_id or from_label, to_id or to_label)
+            if any((leg.get("fromPlaceId") or leg.get("fromLabel"),
+                    leg.get("toPlaceId") or leg.get("toLabel")) == key for leg in connections):
+                raise ValueError("duplicate route connection")
+            connections.append(connection)
         normalized_days.append({
             "day": expected_day,
             "title": text(day_raw.get("title"))[:160] or f"Day {expected_day}",
@@ -1418,7 +1511,11 @@ def normalize_route_plan(
                 {key: value for key, value in item.items() if value not in ("", [])}
                 for item in connections
             ],
+            **{key: text(day_raw[key])[:300] for key in DAY_NOTES if text(day_raw.get(key))},
         })
+        walking = bounded_int(day_raw, "onsiteWalkingMeters", 200000)
+        if walking is not None:
+            normalized_days[-1]["onsiteWalkingMeters"] = walking
 
     unassigned_raw = raw.get("unassigned") or []
     if not isinstance(unassigned_raw, list):
@@ -1458,6 +1555,7 @@ def normalize_route_plan(
             for item in unassigned
         ],
         "assumptions": route_text_list(raw.get("assumptions"), "assumptions", 30),
+        "budget": normalize_budget(raw.get("budget")),
         "cannotProve": merge_unique([
             *route_text_list(raw.get("cannotProve"), "cannotProve", 30),
             "live_traffic",
@@ -1471,7 +1569,7 @@ def normalize_route_plan(
     return plan, excluded
 
 
-def customer_route_plan(plan: dict[str, Any], places: list[dict[str, Any]], locale: str) -> dict[str, Any]:
+def customer_route_plan(plan: dict[str, Any], places: list[dict[str, Any]], locale: str, sequence: int = 0) -> dict[str, Any]:
     en = locale.startswith("en")
     by_id = {text(item.get("id")): item for item in places if isinstance(item, dict)}
     time_labels = {
@@ -1479,8 +1577,8 @@ def customer_route_plan(plan: dict[str, Any], places: list[dict[str, Any]], loca
         "en-US": {"morning": "Morning", "midday": "Midday", "afternoon": "Afternoon", "evening": "Evening", "flexible": "Flexible"},
     }
     mode_labels = {
-        "zh-CN": {"walk": "步行", "transit": "公共交通", "rail": "轨道交通", "boat": "船", "taxi": "出租车/网约车", "drive": "驾车", "flexible": "按现场选择"},
-        "en-US": {"walk": "Walk", "transit": "Public transit", "rail": "Rail", "boat": "Boat", "taxi": "Taxi/ride-hailing", "drive": "Drive", "flexible": "Choose on the day"},
+        "zh-CN": {"walk": "步行", "transit": "公共交通", "rail": "轨道交通", "boat": "船", "flight": "飞机", "taxi": "出租车/网约车", "drive": "驾车", "flexible": "按现场选择"},
+        "en-US": {"walk": "Walk", "transit": "Public transit", "rail": "Rail", "boat": "Boat", "flight": "Flight", "taxi": "Taxi/ride-hailing", "drive": "Drive", "flexible": "Choose on the day"},
     }
     key = "en-US" if en else "zh-CN"
     days: list[dict[str, Any]] = []
@@ -1488,23 +1586,38 @@ def customer_route_plan(plan: dict[str, Any], places: list[dict[str, Any]], loca
         stops = []
         for stop in day.get("stops") or []:
             place = by_id.get(text(stop.get("placeId")), {})
+            timing = copy.deepcopy(stop.get("timing"))
+            if timing and timing.get("sourceUrl"):
+                safe = customer_safe_url(timing["sourceUrl"])
+                if safe:
+                    timing["sourceUrl"] = safe
+                else:
+                    timing.pop("sourceUrl")
+                    timing["status"] = "unverified"
             stops.append({
                 "name": verified_name(place) or first(place, "name"),
                 "address": first(place, "address", "addressText", "positionText"),
                 "timeLabel": time_labels[key].get(text(stop.get("timeBlock")), time_labels[key]["flexible"]),
                 "note": text(stop.get("note")),
+                **({"timing": timing} if timing else {}),
+                **{key: stop[key] for key in ("reservationRequired", "reservationStatus") if key in stop},
             })
         connections = []
         for connection in day.get("connections") or []:
             from_place = by_id.get(text(connection.get("fromPlaceId")), {})
             to_place = by_id.get(text(connection.get("toPlaceId")), {})
+            leg_status = connection_status(connection)
+            labels = FACT_STATUS_LABELS_EN if en else FACT_STATUS_LABELS_ZH
             connections.append({
-                "from": verified_name(from_place) or first(from_place, "name"),
-                "to": verified_name(to_place) or first(to_place, "name"),
+                "from": verified_name(from_place) or first(from_place, "name") or text(connection.get("fromLabel")),
+                "to": verified_name(to_place) or first(to_place, "name") or text(connection.get("toLabel")),
                 "modeLabel": mode_labels[key].get(text(connection.get("mode")), mode_labels[key]["flexible"]),
-                "durationText": text(connection.get("durationText")),
-                "statusLabel": FACT_STATUS_LABELS_EN.get(text(connection.get("status")), "Not manually reviewed") if en else FACT_STATUS_LABELS_ZH.get(text(connection.get("status")), "尚未人工复核"),
-                "note": text(connection.get("note")),
+                "durationText": text(connection.get("durationText")) or (
+                    f"{connection['durationMinutes']} {'min' if en else '分钟'}" if "durationMinutes" in connection else ""
+                ),
+                "statusLabel": labels.get(leg_status, labels["unverified"]),
+                "note": " · ".join(filter(None, (text(connection.get("note")), text(connection.get("tradeoff"))))),
+                **{key: connection[key] for key in ("mode", "durationMinutes", "distanceMeters", "intercity") if key in connection},
             })
         days.append({
             "day": int(day.get("day", 0) or 0),
@@ -1512,6 +1625,7 @@ def customer_route_plan(plan: dict[str, Any], places: list[dict[str, Any]], loca
             "summary": text(day.get("summary")),
             "stops": stops,
             "connections": connections,
+            **{key: text(day[key]) for key in DAY_NOTES if day.get(key)},
         })
     profile = copy.deepcopy(plan.get("tripProfile") or {})
     profile["mustGoPlaces"] = [
@@ -1529,6 +1643,9 @@ def customer_route_plan(plan: dict[str, Any], places: list[dict[str, Any]], loca
     ]
     return {
         "title": text(plan.get("title")),
+        "calendarId": plan.get("calendarId") or plan.get("id"),
+        "calendarSequence": sequence,
+        "budget": normalize_budget(plan.get("budget")),
         "generationLabel": "Arranged from your saved places" if en else "按收藏与偏好整理",
         "mapLabel": "Schematic route map · no live traffic" if en else "示意路线图 · 不含实时交通",
         "tripProfile": {key: value for key, value in profile.items() if value not in ("", None, [])},
@@ -2430,6 +2547,19 @@ def command_route_plan(args: argparse.Namespace) -> None:
             }, ensure_ascii=False))
             return
         plan, excluded = normalize_route_plan(raw, library, args.destination, locale)
+        if any(item.get("id") == plan["id"] for item in library["routePlans"]):
+            # Revisions have their own identities so the previous plan stays in history.
+            plan["id"] = f"route-plan-{uuid.uuid4().hex[:12]}"
+        draft = raw.get("routePlan", raw)
+        active = next((item for item in library["routePlans"] if item.get("destinationKey") == requested_key
+                       and item.get("status") == "active"), {})
+        supplied_calendar_id = draft.get("calendarId")
+        if supplied_calendar_id is not None and (
+            not isinstance(supplied_calendar_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", supplied_calendar_id)
+        ):
+            raise ValueError("calendarId must be a short opaque identifier")
+        plan["calendarId"] = supplied_calendar_id or active.get("calendarId") or active.get("id") or plan["id"]
+        checks = lint_route(plan, {item["id"]: item for item in library["places"] if item.get("id")})
         before = [
             copy.deepcopy(item) for item in library.get("routePlans") or []
             if isinstance(item, dict) and text(item.get("destinationKey")) == requested_key
@@ -2460,7 +2590,25 @@ def command_route_plan(args: argparse.Namespace) -> None:
         "assigned": assigned,
         "unassigned": len(plan.get("unassigned") or []),
         "excludedIncompleteClues": excluded,
+        **checks,
     }, ensure_ascii=False))
+
+
+def command_lint_route(args: argparse.Namespace) -> None:
+    library = load_library(args.library)
+    plan, _ = normalize_route_plan(read_json(args.plan), library, args.destination, args.locale)
+    places = {item["id"]: item for item in library["places"] if item.get("id")}
+    print(json.dumps(lint_route(plan, places), ensure_ascii=False, indent=2))
+
+
+def route_calendar_sequence(library, destination):
+    events = library.get("events") or []
+    route_events = {
+        event["id"] for event in events
+        if event.get("id") and event.get("type") == "route_plan.save" and event.get("entityId") == destination
+    }
+    undos = sum(event.get("type") == "event.undo" and event.get("entityId") in route_events for event in events)
+    return len(route_events) + undos
 
 
 def command_passport(args: argparse.Namespace) -> None:
@@ -2487,14 +2635,6 @@ def command_passport(args: argparse.Namespace) -> None:
             ],
             key=lambda place: (int(place.get("sortOrder", 0) or 0), text(place.get("name"))),
         )
-        latest_snapshot = next(
-            (
-                snapshot for snapshot in reversed(library.get("verificationSnapshots") or [])
-                if isinstance(snapshot, dict)
-                and text(snapshot.get("destinationKey")) == requested_key
-            ),
-            None,
-        )
         active_route_plan = next(
             (
                 plan for plan in reversed(library.get("routePlans") or [])
@@ -2504,11 +2644,14 @@ def command_passport(args: argparse.Namespace) -> None:
             ),
             None,
         )
-        snapshot_items = {
-            text(item.get("placeId")): item
-            for item in ((latest_snapshot or {}).get("items") or [])
-            if isinstance(item, dict) and text(item.get("placeId"))
-        }
+        snapshots = sorted(
+            (snapshot for snapshot in library.get("verificationSnapshots") or []
+             if isinstance(snapshot, dict) and snapshot.get("destinationKey") == requested_key
+             and review_matches_route(snapshot, active_route_plan)),
+            key=lambda snapshot: instant(snapshot.get("checkedAt")) or datetime.min.replace(tzinfo=timezone.utc),
+        )
+        review_state = effective_review_state(snapshots)
+        snapshot_items = {item["placeId"]: item for item in review_state["items"]}
         for place in candidates:
             missing = passport_missing_fields(place)
             if missing:
@@ -2521,8 +2664,14 @@ def command_passport(args: argparse.Namespace) -> None:
                 customer_input = copy.deepcopy(place)
                 reviewed = snapshot_items.get(text(place.get("id")))
                 if reviewed:
-                    customer_input["detailLookupAudit"] = copy.deepcopy(reviewed.get("factAudits") or [])
-                    customer_input["executionRisks"] = copy.deepcopy(reviewed.get("executionRisks") or [])
+                    audits = {a["field"]: a for a in customer_input.get("detailLookupAudit") or []
+                              if isinstance(a, dict) and a.get("field")}
+                    risks = {r["type"]: r for r in customer_input.get("executionRisks") or []
+                             if isinstance(r, dict) and r.get("type")}
+                    audits.update({a["field"]: a for a in reviewed["factAudits"]})
+                    risks.update({r["type"]: r for r in reviewed["executionRisks"]})
+                    customer_input["detailLookupAudit"] = list(audits.values())
+                    customer_input["executionRisks"] = list(risks.values())
                 delivered.append(
                     customer_place(customer_input, args.locale, content_depth, media_by_id)
                 )
@@ -2549,8 +2698,9 @@ def command_passport(args: argparse.Namespace) -> None:
             "places": delivered,
             "mapRegion": getattr(args, "map_region", "unknown"),
             "placesOnly": not active_route_plan,
-            "routePlan": customer_route_plan(active_route_plan, candidates, args.locale) if active_route_plan else {},
-            "tripRisks": customer_execution_risks((latest_snapshot or {}).get("tripRisks"), args.locale),
+            "routePlan": customer_route_plan(active_route_plan, candidates, args.locale,
+                                             route_calendar_sequence(library, requested_key)) if active_route_plan else {},
+            "tripRisks": customer_execution_risks(review_state["tripRisks"], args.locale),
             "retainedClueCount": len(retained),
         }
         stage_customer_photos(payload["places"], args.output)
@@ -2594,9 +2744,13 @@ def read_patch(path: str) -> dict[str, Any]:
         if field == "waypoints":
             if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
                 raise ValueError("waypoints must be an array of strings")
+        elif field == "mapRegion":
+            if value not in ("mainland", "outside_mainland", "unknown"):
+                raise ValueError("mapRegion must be mainland, outside_mainland or unknown")
         elif field == "openingHours":
             if not isinstance(value, (str, dict)):
                 raise ValueError("openingHours must be text or an object")
+            normalize_opening_hours(value)
         elif not isinstance(value, str):
             raise ValueError(f"{field} must be text")
     if "placeType" in patch and patch["placeType"] not in {"business", "venue", "public_space", "route"}:
@@ -3129,7 +3283,7 @@ def validate_library_contract(library: dict[str, Any]) -> list[str]:
             continue
         snapshot_id = text(snapshot.get("id"))
         trigger = text(snapshot.get("trigger"))
-        if trigger not in {"agreed_date_once", "pre_trip_on_demand_legacy"}:
+        if trigger not in {"agreed_date_once", "agreed_trip_node", "pre_trip_on_demand_legacy"}:
             issues.append(f"invalid_review_trigger:{snapshot_id}")
         if trigger == "pre_trip_on_demand_legacy":
             if snapshot.get("legacyImported") is not True:
@@ -3163,10 +3317,138 @@ def review_diff(previous: Optional[dict[str, Any]], items: list[dict[str, Any]])
         new_facts = item.get("facts") or {}
         if not isinstance(old_facts, dict) or not isinstance(new_facts, dict):
             continue
-        for field in sorted(set(old_facts) | set(new_facts)):
+        for field in sorted(new_facts):
             if old_facts.get(field) != new_facts.get(field):
                 changes.append({"placeId": place_id, "field": field, "before": old_facts.get(field), "after": new_facts.get(field)})
     return changes
+
+
+REVIEW_NODES = {
+    "T-7": (7, ["openingHours", "reservationRules", "price"]),
+    "T-3": (3, ["weather", "transport", "lastService"]),
+    "T-1": (1, ["closures", "reservationStatus", "price", "transport", "weather"]),
+}
+DEPARTURE_CHECKLIST = {
+    "zh-CN": ["核对身份证件和通行证件", "保存预约或购票凭证", "下载离线地图", "保存当地语言写法的地址"],
+    "en-US": ["Check ID and travel documents", "Save reservation and ticket confirmations",
+              "Download offline maps", "Save addresses in the local language"],
+}
+
+
+def active_route_for(library, key):
+    return next((p for p in reversed(library["routePlans"])
+                 if p.get("destinationKey") == key and p.get("status") == "active"), None)
+
+
+def review_matches_route(snapshot, route):
+    if not snapshot.get("tripStartDate"):
+        return True  # Historical unbound reviews are still readable.
+    if not route:
+        return False
+    return (
+        snapshot["tripStartDate"] == (route.get("tripProfile") or {}).get("startDate")
+        and snapshot.get("calendarId") == (route.get("calendarId") or route.get("id"))
+    )
+
+
+def effective_review_state(snapshots):
+    """Overlay sparse observations; a later check can update only the fields it reviewed."""
+    places: dict[str, dict[str, Any]] = {}
+    risks: dict[str, dict[str, Any]] = {}
+    for snapshot in snapshots:
+        risks.update({r["type"]: r for r in snapshot.get("tripRisks") or [] if r.get("type")})
+        for item in snapshot.get("items") or []:
+            if not isinstance(item, dict) or not item.get("placeId"):
+                continue
+            current = places.setdefault(item["placeId"], {"facts": {}, "factAudits": {}, "executionRisks": {}})
+            current["facts"].update(item.get("facts") or {})
+            current["factAudits"].update({a["field"]: a for a in item.get("factAudits") or [] if a.get("field")})
+            current["executionRisks"].update({r["type"]: r for r in item.get("executionRisks") or [] if r.get("type")})
+    as_of = instant(snapshots[-1].get("checkedAt")) if snapshots else None
+    return {
+        "items": [
+            {"placeId": place_id, "facts": current["facts"],
+             "factAudits": [with_freshness(a, as_of=as_of) for a in current["factAudits"].values()],
+             "executionRisks": [with_freshness(r, as_of=as_of) for r in current["executionRisks"].values()]}
+            for place_id, current in places.items()
+        ],
+        "tripRisks": [with_freshness(r, as_of=as_of) for r in risks.values()],
+    }
+
+
+def review_schedule(route):
+    start = (route.get("tripProfile") or {}).get("startDate") if route else None
+    if not start:
+        raise ValueError("save a route with tripProfile.startDate before scheduling review nodes")
+    departure = date.fromisoformat(start)
+    return [{"node": key, "agreedReviewDate": (departure - timedelta(days=days)).isoformat(), "check": fields}
+            for key, (days, fields) in REVIEW_NODES.items()]
+
+
+def command_review_schedule(args):
+    library = load_library(args.library)
+    key = destination_key_for_library(library, args.destination)
+    route = active_route_for(library, key)
+    print(json.dumps({"destinationKey": key, "startDate": (route or {}).get("tripProfile", {}).get("startDate"),
+                      "nodes": review_schedule(route)}, ensure_ascii=False, indent=2))
+
+
+def review_change_groups(previous, items, trip_risks, changes, checked_at):
+    groups = {"blocking": [], "adjust": [], "info": []}
+    place_items = {item["placeId"]: item for item in items}
+    old_items = {item["placeId"]: item for item in (previous or {}).get("items", []) if item.get("placeId")}
+    unavailable = {"closed", "cancelled", "canceled", "sold_out", "no_tickets", "unavailable", "fully_booked", "闭馆", "关闭", "无票", "售罄"}
+
+    def verified_blocker(field, value, audit):
+        token = text(value).casefold().replace(" ", "_")
+        return audit.get("status") == "verified" and (
+            token in unavailable
+            or (value is False and normalized_token(field) in {"isopen", "ticketsavailable", "reservationavailable"})
+        )
+
+    changed_facts = {(c["placeId"], c["field"]) for c in changes}
+    for change in changes:
+        field = change["field"]
+        audits = {a["field"]: a for a in place_items[change["placeId"]].get("factAudits", [])}
+        audit = audits.get(field, {})
+        value = change["after"]
+        if verified_blocker(field, value, audit):
+            level = "blocking"
+        elif re.search(r"open|clos|reserv|ticket|transit|transport|flight|weather|price", field, re.I):
+            level = "adjust"
+        else:
+            level = "info"
+        groups[level].append(change)
+    for place_id, item in place_items.items():
+        old = {a["field"]: a for a in old_items.get(place_id, {}).get("factAudits", [])}
+        new = {a["field"]: a for a in item.get("factAudits", [])}
+        for field, audit in new.items():
+            prior = old.get(field, {}).get("status")
+            status = audit["status"]
+            if prior != status and status in {"stale", "conflict", "not_found"}:
+                groups["adjust"].append({"placeId": place_id, "field": field, "beforeStatus": prior, "afterStatus": status})
+            if prior != status and (place_id, field) not in changed_facts and verified_blocker(field, item["facts"].get(field), audit):
+                groups["blocking"].append({"placeId": place_id, "field": field, "beforeStatus": prior,
+                                           "afterStatus": status, "after": item["facts"][field]})
+    for place_id, item in old_items.items():
+        refreshed = {a["field"] for a in place_items.get(place_id, {}).get("factAudits", [])}
+        for audit in item.get("factAudits", []):
+            field = audit["field"]
+            if field not in refreshed and audit["status"] == "verified" and with_freshness(audit, as_of=checked_at)["status"] == "stale":
+                groups["adjust"].append({"placeId": place_id, "field": field, "beforeStatus": "verified", "afterStatus": "stale"})
+    old_risks = {(item.get("placeId"), r["type"]): r for item in old_items.values() for r in item.get("executionRisks", [])}
+    old_risks.update({(None, r["type"]): r for r in (previous or {}).get("tripRisks", [])})
+    new_risks = {(item["placeId"], r["type"]): r for item in items for r in item["executionRisks"]}
+    new_risks.update({(None, r["type"]): r for r in trip_risks})
+    for (place_id, risk_type), risk in new_risks.items():
+        before = old_risks.get((place_id, risk_type), {})
+        if any(risk.get(field) != before.get(field) for field in ("status", "summary", "severity")):
+            level = risk.get("severity", "adjust")
+            if level == "blocking" and risk["status"] != "verified":
+                level = "adjust"
+            groups[level].append({"placeId": place_id, "type": risk_type, "status": risk["status"],
+                                  "before": before.get("summary"), "after": risk["summary"]})
+    return groups
 
 
 def command_review(args: argparse.Namespace) -> None:
@@ -3188,14 +3470,18 @@ def command_review(args: argparse.Namespace) -> None:
     items = raw.get("items")
     if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
         raise ValueError("checks must contain an items array")
-    requested_key = destination_key_for_library(load_library(args.library), args.destination)
+    seen = set()
     for item in items:
-        if not text(item.get("placeId")):
-            raise ValueError("every review item needs placeId")
+        item["placeId"] = text(item.get("placeId"))
+        if not item["placeId"] or item["placeId"] in seen:
+            raise ValueError("every review item needs a unique placeId")
+        seen.add(item["placeId"])
         item.setdefault("accessLevel", "public_readable")
         item.setdefault("canSupport", [])
         item.setdefault("cannotProve", [])
         item.setdefault("facts", {})
+        if not isinstance(item["facts"], dict):
+            raise ValueError("review facts must be an object")
         supplied_audits = item.get("factAudits") or item.get("detailLookupAudit") or []
         if not isinstance(supplied_audits, list):
             raise ValueError("factAudits must be an array")
@@ -3235,16 +3521,42 @@ def command_review(args: argparse.Namespace) -> None:
     if any(risk["scope"] != "trip" for risk in trip_risks):
         raise ValueError("tripRisks only accepts trip-scoped risks")
     snapshot: dict[str, Any] = {}
+    node = text(raw.get("node"))
+    if node and node not in REVIEW_NODES:
+        raise ValueError("node must be T-7, T-3 or T-1")
     with library_transaction(args.library) as library:
+        requested_key = destination_key_for_library(library, args.destination)
+        route = active_route_for(library, requested_key)
+        start = (route or {}).get("tripProfile", {}).get("startDate")
+        calendar_id = (route or {}).get("calendarId") or (route or {}).get("id")
+        if node:
+            expected = next(item["agreedReviewDate"] for item in review_schedule(route) if item["node"] == node)
+            if agreed_review_date != expected:
+                raise ValueError(f"{node} must be on {expected} for this trip")
         previous_same_date = next(
             (item for item in library["verificationSnapshots"]
              if text(item.get("destinationKey")) == requested_key
              and text(item.get("agreedReviewDate")) == agreed_review_date
-             and item.get("trigger") == "agreed_date_once"),
+             and item.get("node", "") == node
+             and review_matches_route(item, route)
+             and (item.get("tripStartDate") or "") == (start or "")
+             and item.get("trigger") in {"agreed_date_once", "agreed_trip_node"}),
             None,
         )
         if previous_same_date:
-            raise ValueError("A review already exists for this destination and date")
+            print(json.dumps({
+                "status": "already_recorded", "snapshotId": previous_same_date["id"],
+                "changes": previous_same_date.get("changes", []),
+                "changeGroups": previous_same_date.get("changeGroups", {}),
+                "departureChecklist": previous_same_date.get("departureChecklist", []),
+            }, ensure_ascii=False))
+            return
+        if node and any(
+            item.get("destinationKey") == requested_key and item.get("node")
+            and review_matches_route(item, route) and (when := instant(item.get("checkedAt"))) and when >= parsed_check
+            for item in library["verificationSnapshots"]
+        ):
+            raise ValueError("review nodes must be recorded in order; continue with a later node or a custom check date")
         valid_place_ids = {
             text(place.get("id")) for place in library["places"]
             if text(place.get("destinationKey")) == requested_key
@@ -3252,18 +3564,22 @@ def command_review(args: argparse.Namespace) -> None:
         unknown = sorted({text(item.get("placeId")) for item in items} - valid_place_ids)
         if unknown:
             raise ValueError("review contains places outside the destination: " + ", ".join(unknown))
-        previous = next(
-            (
-                item for item in reversed(library["verificationSnapshots"])
-                if text(item.get("destinationKey")) == requested_key
-            ),
-            None,
-        )
+        earlier = [
+            item for item in library["verificationSnapshots"]
+            if item.get("destinationKey") == requested_key and review_matches_route(item, route)
+            and (when := instant(item.get("checkedAt"))) and when < parsed_check
+        ]
+        earlier.sort(key=lambda item: instant(item["checkedAt"]))
+        previous = effective_review_state(earlier)
         changes = review_diff(previous, items)
+        groups = review_change_groups(previous, items, trip_risks, changes, parsed_check)
+        checklist = DEPARTURE_CHECKLIST[normalized_locale(getattr(args, "locale", "zh-CN"))]
         snapshot = {
             "id": f"verification-{uuid.uuid4().hex[:12]}",
             "destinationKey": requested_key,
-            "trigger": "agreed_date_once",
+            "trigger": "agreed_trip_node" if node else "agreed_date_once",
+            **({"node": node} if node else {}),
+            **({"tripStartDate": start, "calendarId": calendar_id} if start else {}),
             "agreedReviewDate": agreed_review_date,
             "agreementConfirmed": True,
             "checkedAt": checked_at,
@@ -3271,6 +3587,8 @@ def command_review(args: argparse.Namespace) -> None:
             "items": copy.deepcopy(items),
             "tripRisks": copy.deepcopy(trip_risks),
             "changes": changes,
+            "changeGroups": groups,
+            "departureChecklist": checklist,
             "summary": text(raw.get("summary")),
         }
         library["verificationSnapshots"].append(snapshot)
@@ -3283,7 +3601,8 @@ def command_review(args: argparse.Namespace) -> None:
         )
     if text(getattr(args, "output", "")):
         atomic_write_json(args.output, snapshot)
-    print(json.dumps({"status": "reviewed", "snapshotId": snapshot["id"], "changes": snapshot["changes"]}, ensure_ascii=False, indent=2))
+    print(json.dumps({"status": "reviewed", "snapshotId": snapshot["id"], "changes": changes,
+                      "changeGroups": groups, "departureChecklist": checklist}, ensure_ascii=False, indent=2))
 
 
 def iter_text_payloads(path: Path) -> Iterator[tuple[str, str]]:
@@ -3551,6 +3870,21 @@ def normalize_credential_whitespace(value: str) -> str:
     )
 
 
+def text_scan_issues(content: str, mode: str) -> list[str]:
+    issues = []
+    secret_scan_content = normalize_credential_whitespace(decode_html_entities(re.sub(
+        r"data:image/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+", "[embedded-image]", content,
+    )))
+    if SECRET_PATTERN.search(secret_scan_content):
+        issues.append("possible_secret")
+    if mode == "customer":
+        scan_content = decode_html_entities(customer_text_for_scan(content))
+        if CUSTOMER_INTERNAL_PATTERN.search(scan_content) or CUSTOMER_LOCAL_PATH_PATTERN.search(scan_content):
+            issues.append("customer_internal_leak")
+        issues.extend(customer_url_issues(content))
+    return issues
+
+
 def command_scan(args: argparse.Namespace) -> None:
     target = Path(args.path)
     if not target.exists():
@@ -3581,19 +3915,7 @@ def command_scan(args: argparse.Namespace) -> None:
             if args.mode == "package":
                 issues.extend(release_manifest_issues(archive))
     for name, content in iter_text_payloads(target):
-        secret_scan_content = normalize_credential_whitespace(decode_html_entities(re.sub(
-            r"data:image/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+",
-            "[embedded-image]",
-            content,
-        )))
-        scan_content = decode_html_entities(customer_text_for_scan(content))
-        if SECRET_PATTERN.search(secret_scan_content):
-            issues.append({"file": name, "type": "possible_secret"})
-        if args.mode == "customer":
-            if CUSTOMER_INTERNAL_PATTERN.search(scan_content) or CUSTOMER_LOCAL_PATH_PATTERN.search(scan_content):
-                issues.append({"file": name, "type": "customer_internal_leak"})
-            for issue in customer_url_issues(content):
-                issues.append({"file": name, "type": issue})
+        issues.extend({"file": name, "type": issue} for issue in text_scan_issues(content, args.mode))
     if issues:
         raise ValueError("scan failed: " + json.dumps(issues, ensure_ascii=False))
     print(json.dumps({"status": "clean", "mode": args.mode, "path": str(target)}, ensure_ascii=False))
@@ -3641,9 +3963,13 @@ def command_confirm(args: argparse.Namespace) -> None:
         if field == "waypoints":
             if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
                 raise ValueError("waypoints must be an array of strings")
+        elif field == "mapRegion":
+            if value not in ("mainland", "outside_mainland", "unknown"):
+                raise ValueError("mapRegion must be mainland, outside_mainland or unknown")
         elif field == "openingHours":
             if not isinstance(value, (str, dict)):
                 raise ValueError("openingHours must be text or an object")
+            normalize_opening_hours(value)
         elif not isinstance(value, str):
             raise ValueError(f"{field} must be text")
     operation_id = get_operation_id(args, f"confirm:{args.place_id}:{uuid.uuid4().hex[:12]}")
@@ -3757,6 +4083,13 @@ def build_parser() -> argparse.ArgumentParser:
     route_plan.add_argument("--operation-id", default="")
     route_plan.set_defaults(func=command_route_plan)
 
+    lint = sub.add_parser("lint-route")
+    lint.add_argument("--library", required=True)
+    lint.add_argument("--destination", required=True)
+    lint.add_argument("--plan", required=True)
+    lint.add_argument("--locale", choices=("zh-CN", "en-US", "en"), default="zh-CN")
+    lint.set_defaults(func=command_lint_route)
+
     passport = sub.add_parser("passport")
     passport.add_argument("--library", required=True)
     passport.add_argument("--destination", required=True)
@@ -3829,11 +4162,17 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument("--library", required=True)
     validate.set_defaults(func=command_validate)
 
+    schedule = sub.add_parser("review-schedule")
+    schedule.add_argument("--library", required=True)
+    schedule.add_argument("--destination", required=True)
+    schedule.set_defaults(func=command_review_schedule)
+
     review = sub.add_parser("review")
     review.add_argument("--library", required=True)
     review.add_argument("--destination", required=True)
     review.add_argument("--checks", required=True)
     review.add_argument("--output", default="")
+    review.add_argument("--locale", choices=("zh-CN", "en-US", "en"), default="zh-CN")
     review.add_argument("--operation-id", default="")
     review.set_defaults(func=command_review)
 
