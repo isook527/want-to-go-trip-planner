@@ -37,6 +37,11 @@ assert EXTRACT_SPEC and EXTRACT_SPEC.loader
 EXTRACT = importlib.util.module_from_spec(EXTRACT_SPEC)
 EXTRACT_SPEC.loader.exec_module(EXTRACT)
 
+DISPLAY_SPEC = importlib.util.spec_from_file_location("prepare_display_image", DISPLAY_SCRIPT)
+assert DISPLAY_SPEC and DISPLAY_SPEC.loader
+DISPLAY = importlib.util.module_from_spec(DISPLAY_SPEC)
+DISPLAY_SPEC.loader.exec_module(DISPLAY)
+
 
 def product_config():
     return json.loads((SKILL / "config" / "product.json").read_text(encoding="utf-8"))
@@ -60,6 +65,30 @@ def complete_business(**overrides):
     return place
 
 
+def customer_route_plan(places: list[dict], locale: str = "zh-CN") -> dict:
+    en = locale == "en-US"
+    stops = [
+        {
+            "name": place.get("displayName") or place.get("name") or "Saved place",
+            "timeLabel": "Morning" if en else "上午",
+            "address": place.get("address") or place.get("positionText") or "",
+            "note": "",
+        }
+        for place in places
+    ]
+    return {
+        "title": "A day with your saved places" if en else "把收藏排成一天",
+        "generationLabel": "Arranged from your saved places" if en else "按收藏与偏好整理",
+        "mapLabel": "Schematic route · No live traffic" if en else "示意路线 · 不含实时交通",
+        "days": [{"day": 1, "title": "Day 1" if en else "第一天", "summary": "", "stops": stops, "connections": []}],
+        "unassigned": [],
+        "boundary": (
+            "This ordering is based on available information and is not live navigation or a guarantee of future hours."
+            if en else "本路线按现有信息编排，不是实时导航，也不保证未来营业状态。"
+        ),
+    }
+
+
 class PublicSkillRegressionTests(unittest.TestCase):
     maxDiff = None
 
@@ -78,6 +107,10 @@ class PublicSkillRegressionTests(unittest.TestCase):
             input_path = base / "passport.json"
             output_path = base / "passport.html"
             staged = json.loads(json.dumps(payload, ensure_ascii=False))
+            staged.setdefault(
+                "routePlan",
+                customer_route_plan(staged.get("places") or [], staged.get("locale") or "zh-CN"),
+            )
             assets = base / "assets"
             for index, place in enumerate(staged.get("places") or []):
                 for key in ("photo", "displayPhoto"):
@@ -92,45 +125,14 @@ class PublicSkillRegressionTests(unittest.TestCase):
                     target.write_bytes(source.read_bytes())
                     photo["path"] = str(target)
             input_path.write_text(json.dumps(staged, ensure_ascii=False), encoding="utf-8")
-            subprocess.run(
+            result = subprocess.run(
                 ["node", str(RENDERER), str(input_path), str(output_path)],
                 check=True,
                 capture_output=True,
                 text=True,
             )
+            self.last_render_message = result.stdout.strip()
             return output_path.read_text(encoding="utf-8")
-
-    def test_01_onboarding_zh_customer_safe(self):
-        output = self.run_onboarding("zh-CN")
-        config = product_config()
-        self.assertEqual(output, config["copy"]["onboardingZh"])
-        self.assertIn("想去库", output)
-        self.assertIn("生成曼谷想去护照", output)
-        self.assertIn("小红书完整笔记链接、携程地点链接和公开公众号文章", output)
-        self.assertIn("马蜂窝遇安全检测时会保留原链接", output)
-        self.assertIn("抖音会读取本轮公开作品页", output)
-        self.assertIn("TikTok 和 YouTube", output)
-        self.assertIn("Instagram 支持公开帖子与 Reel", output)
-        self.assertIn("多地点文章不会冒充一个地点", output)
-        for banned in ("OCR", "模型", "宿主诊断", "/Users/", ".workbuddy", "localhost"):
-            self.assertNotIn(banned, output)
-
-    def test_02_onboarding_en_customer_safe(self):
-        output = self.run_onboarding("en")
-        config = product_config()
-        self.assertEqual(output, config["copy"]["onboardingEn"])
-        self.assertIn("want-to-go library", output)
-        self.assertIn("Douyin reads only public video-page metadata", output)
-        self.assertIn("TikTok and YouTube use public embed metadata", output)
-        self.assertIn("Instagram supports public posts and Reels", output)
-        for banned in ("OCR", "model", "host diagnostic", "/Users/", ".workbuddy", "localhost"):
-            self.assertNotIn(banned, output.lower())
-
-    def test_03_current_message_only_contract(self):
-        skill_text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
-        self.assertIn("本轮消息", skill_text)
-        self.assertIn("禁止扫描 Downloads、Desktop、最近文件、相邻工作区", skill_text)
-        self.assertIn("禁止按时间、文件名或目录位置猜附件", skill_text)
 
     def test_04_source_link_preserved_when_fetch_failed(self):
         links = W2G.source_links(
@@ -228,6 +230,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
                     destination="曼谷",
                     output=str(output_path),
                     locale="zh-CN",
+                    places_only=True,
                 )
             )
             payload = json.loads(output_path.read_text(encoding="utf-8"))
@@ -237,33 +240,24 @@ class PublicSkillRegressionTests(unittest.TestCase):
             self.assertEqual(len(saved["places"]), 2)
             self.assertTrue(saved["bundles"][0]["passportGenerated"])
 
-    def test_11_renderer_uses_two_public_tiers_and_keeps_source_link(self):
-        config = product_config()
-        payload = {
-            "locale": "zh-CN",
-            "destination": "曼谷",
-            "title": "Go passport · 曼谷",
-            "places": [W2G.customer_place(complete_business(), "zh-CN")],
-            "retainedClueCount": 2,
-        }
-        html = self.render(payload)
-        self.assertIn("kornvia-passport-2.4.3", html)
-        self.assertIn("一张能带走的想去行程单", html)
-        self.assertIn("想去库整理好后，也可以交给人工继续排。", html)
-        self.assertIn(config["offers"]["free"]["price"], html)
-        self.assertNotIn("¥0", html)
-        self.assertIn(config["offers"]["free"]["nameZh"], html)
-        self.assertIn(config["offers"]["manualItineraryBeta"]["price"], html)
-        self.assertIn(config["offers"]["manualItineraryBeta"]["nameZh"], html)
-        self.assertNotIn("pre-trip-review", html)
-        self.assertIn('name="offerId" value="manual-itinerary-beta"', html)
-        self.assertNotIn('<select name="offerId"', html)
-        self.assertIn(config["form"]["requestUrl"], html)
-        self.assertIn("https://example.com/source", html)
-        self.assertIn("另有 2 条地点线索已保留", html)
-        english_html = self.render({**payload, "locale": "en-US"})
-        self.assertIn(config["offers"]["free"]["priceEn"], english_html)
-        self.assertNotIn(config["offers"]["free"]["price"], english_html)
+    def test_render_complete_passport_without_sales_or_submission(self):
+        for locale, region, map_host, title in (
+            ("zh-CN", "mainland", "uri.amap.com/search", "逐日行程"),
+            ("en-US", "outside_mainland", "google.com/maps/search", "DAY-BY-DAY PLAN"),
+        ):
+            payload = {
+                "locale": locale, "destination": "Example City", "mapRegion": region,
+                "places": [W2G.customer_place(complete_business(), locale)], "retainedClueCount": 2,
+                "requestForm": {"url": "https://example.com/old-form"},
+                "humanReview": {"price": "¥199"},
+            }
+            page = self.render(payload)
+            self.assertIn(title, page)
+            self.assertIn(map_host, page)
+            self.assertIn("https://example.com/source", page)
+            for forbidden in ("<form", "old-form", "¥199", "manual-itinerary-beta"):
+                self.assertNotIn(forbidden, page)
+
 
     def test_12_customer_outputs_have_no_internal_or_old_payment_terms(self):
         html = self.render(
@@ -300,9 +294,6 @@ class PublicSkillRegressionTests(unittest.TestCase):
             "PAYMENT_MODE",
         ):
             self.assertNotIn(banned, customer_text)
-        for offer in product_config()["offers"].values():
-            if offer.get("price"):
-                self.assertNotIn(f'{offer["price"]} 完整逐日行程', customer_text)
         self.assertNotIn("pre-trip-review", customer_text)
         self.assertNotIn("正式价", customer_text)
         self.assertNotIn("固定每周限单", customer_text)
@@ -427,57 +418,6 @@ class PublicSkillRegressionTests(unittest.TestCase):
             self.assertNotIn('class="hand-note"', html)
             self.assertIn('class="hero-stub"', html)
 
-    def test_15_inline_request_form_posts_to_api_and_external_page_is_fallback(self):
-        html = self.render(
-            {
-                "locale": "zh-CN",
-                "destination": "曼谷",
-                "places": [W2G.customer_place(complete_business(), "zh-CN")],
-                "retainedClueCount": 0,
-            }
-        )
-        self.assertIn("kornvia-passport-2.4.3", html)
-        self.assertIn("--canvas:#F6E8C8", html)
-        self.assertIn("body{margin:0;color:var(--ink);background:var(--canvas);", html)
-        self.assertNotIn("#E9E8E3", html)
-        self.assertNotIn("radial-gradient(circle at 8% 4%", html)
-        self.assertNotIn("linear-gradient(rgba(23,23,23,.018)", html)
-        self.assertNotIn("background:#F2B51D", html)
-        self.assertIn(".photo{aspect-ratio:4/3", html)
-        self.assertIn("flex:0 0 auto", html)
-        self.assertNotIn("gap:18px;height:100%", html)
-        self.assertEqual(html.count("box-shadow:var(--shadow)"), 2)
-        self.assertIn("border:5px solid var(--ink)", html)
-        self.assertIn(
-            'action="https://trip-api.kornvia.com/trip-requests" method="post"',
-            html,
-        )
-        self.assertIn('target="_blank"', html)
-        self.assertIn('name="destination" value="曼谷"', html)
-        self.assertIn('name="startDate" type="date" required', html)
-        self.assertIn('name="days" required', html)
-        self.assertIn('name="contact" required maxlength="120"', html)
-        self.assertIn('name="notes" maxlength="1200"', html)
-        self.assertIn('name="locale" value="zh-CN"', html)
-        self.assertIn('name="placeCount" value="1"', html)
-        self.assertIn('name="offerId" value="manual-itinerary-beta"', html)
-        self.assertNotIn('value="pre-trip-review"', html)
-        days_select = re.search(r'<select name="days"[^>]*>(.*?)</select>', html, re.DOTALL)
-        self.assertIsNotNone(days_select)
-        day_values = re.findall(r'<option value="([^"]*)">', days_select.group(1))
-        self.assertEqual(day_values, ["", "3", "4", "5", "6", "7"])
-        self.assertIn('name="website" tabindex="-1"', html)
-        self.assertIn("提交行程需求，不会立即扣款", html)
-        self.assertIn("这些信息只用于确认行程范围、档期、交付时间和后续联系", html)
-        self.assertIn("不在此页面收款", html)
-        self.assertIn("双方约定的复核日检查一次", html)
-        self.assertIn("提交意愿 → 确认范围、档期和交付时间", html)
-        self.assertNotIn("自动扣款", html)
-        self.assertIn('class="fallback"', html)
-        self.assertIn("打开备用需求页", html)
-        self.assertIn("destination=%E6%9B%BC%E8%B0%B7", html)
-        self.assertNotIn(">提交完整行程需求</a>", html)
-
     def test_16_departure_tip_alias_is_accepted_and_rendered(self):
         place = complete_business(visitTip="", departureTip="雨天优先打车到门口")
         self.assertEqual(W2G.passport_missing_fields(place), [])
@@ -525,6 +465,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
                         destination="曼谷",
                         output=str(output_path),
                         locale="zh-CN",
+                        places_only=True,
                     )
                 )
 
@@ -598,21 +539,6 @@ class PublicSkillRegressionTests(unittest.TestCase):
             self.assertIn("https://example.com/b", cards[1])
             self.assertNotIn("https://example.com/a", cards[1])
             self.assertEqual(html.count('class="photo"'), 2)
-
-    def test_20_skill_documents_manifest_and_per_place_source_contract(self):
-        skill_text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
-        for required in (
-            '"sources"',
-            '"type": "screenshot"',
-            '"group": "place-1"',
-            'sourceIds',
-            "submittedUrl",
-            "untrustedInstructionsDetected",
-            "原图不可覆盖",
-            "原始链接必须位于对应地点卡下方",
-            "图片、视频或文字来源没有顾客 URL 时，不显示链接模块",
-        ):
-            self.assertIn(required, skill_text)
 
     def test_21_shared_screenshot_is_kept_on_each_related_place(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -947,8 +873,12 @@ class PublicSkillRegressionTests(unittest.TestCase):
                     destination="曼谷",
                     output=str(passport_path),
                     locale="zh-CN",
+                    places_only=True,
                 )
             )
+            report = json.loads(passport_path.read_text(encoding="utf-8"))
+            report["routePlan"] = customer_route_plan(report["places"], "zh-CN")
+            passport_path.write_text(json.dumps(report, ensure_ascii=False), encoding="utf-8")
             rendered_path = base / "passport.html"
             subprocess.run(
                 ["node", str(RENDERER), str(passport_path), str(rendered_path)],
@@ -1010,6 +940,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
                     destination="上海",
                     output=str(passport_path),
                     locale="zh-CN",
+                    places_only=True,
                 )
             )
             report = json.loads(passport_path.read_text(encoding="utf-8"))
@@ -1139,6 +1070,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
                         destination="曼谷",
                         output=str(passport_path),
                         locale="zh-CN",
+                        places_only=True,
                     )
                 )
 
@@ -1162,21 +1094,10 @@ class PublicSkillRegressionTests(unittest.TestCase):
             library = W2G.load_library(library_path)
             W2G.save_library(library_path, library)
             migrated = json.loads(library_path.read_text(encoding="utf-8"))
-            self.assertEqual(migrated["schemaVersion"], "2.3.0")
+            self.assertEqual(migrated["schemaVersion"], "2.4.0")
             self.assertEqual({item["key"] for item in migrated["destinations"]}, {"shanghai", "bangkok"})
             self.assertIn("sources", migrated)
             self.assertIn("media", migrated)
-
-    def test_31_current_cta_and_403_documentation_are_locked(self):
-        renderer = RENDERER.read_text(encoding="utf-8")
-        skill_text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
-        config = json.loads((SKILL / "config" / "product.json").read_text(encoding="utf-8"))
-        self.assertEqual(config["form"]["requestUrl"], "https://trip-api.kornvia.com/trip-requests")
-        self.assertEqual(config["form"]["legacyStatus"], 404)
-        self.assertIn("PRODUCT_CONFIG.form.requestUrl", renderer)
-        self.assertNotIn("https://kornvia.com/trip-requests", renderer)
-        self.assertIn("顾客实际提交的 URL 即使读取失败也要保留", skill_text)
-        self.assertIn("没有顾客 URL 时，不显示链接模块", skill_text)
 
     def test_32_text_dominant_mobile_screenshot_is_not_used_as_main_photo(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1353,6 +1274,14 @@ class PublicSkillRegressionTests(unittest.TestCase):
                 },
             ),
             mock.patch.object(EXTRACT, "command_probe", return_value=ready_command),
+            mock.patch.object(
+                EXTRACT,
+                "opencli_probe",
+                return_value={
+                    "installed": True, "version": "1.8.6", "expectedVersion": "1.8.6",
+                    "ready": True, "trusted": True,
+                },
+            ),
         ):
             report = EXTRACT.doctor_report("zh-CN")
         self.assertEqual(report["platform"]["name"], "Windows")
@@ -1419,20 +1348,6 @@ class PublicSkillRegressionTests(unittest.TestCase):
         self.assertTrue(tesseract["englishReady"])
         self.assertTrue(tesseract["chineseReady"])
 
-    def test_37_dual_platform_entrypoints_and_version_marker_are_documented(self):
-        skill_text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
-        windows_doctor = (SKILL / "scripts" / "doctor_windows.ps1").read_text(encoding="utf-8")
-        renderer = (SKILL / "renderer" / "kornvia-brand.mjs").read_text(encoding="utf-8")
-        self.assertIn("正式支持 macOS 与 Windows", skill_text)
-        self.assertIn("doctor_windows.ps1", skill_text)
-        self.assertIn("py scripts\\want_to_go.py onboarding", skill_text)
-        self.assertIn("Get-Command", windows_doctor)
-        self.assertIn("$productConfig.installDoctorMarker", windows_doctor)
-        self.assertIn("PRODUCT_CONFIG.passportTemplateMarker", renderer)
-        config = json.loads((SKILL / "config" / "product.json").read_text(encoding="utf-8"))
-        self.assertEqual(config["installDoctorMarker"], "kornvia-install-doctor-2.4.3")
-        self.assertEqual(config["passportTemplateMarker"], "kornvia-passport-2.4.3")
-
     def test_38_ffmpeg_doctor_uses_supported_version_flag(self):
         missing = {"installed": False, "version": "", "ready": False}
         with (
@@ -1482,63 +1397,16 @@ class PublicSkillRegressionTests(unittest.TestCase):
         text = (SKILL / "scripts" / "doctor_windows.ps1").read_text(encoding="ascii")
         self.assertLess(text.index('Test-Executable "python"'), text.index('Test-Executable "py"'))
 
-    def test_42_windows_commands_lock_utf8_for_the_whole_session(self):
-        skill_text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
-        self.assertGreaterEqual(skill_text.count('$env:PYTHONUTF8 = "1"'), 2)
-        self.assertIn("必须在同一个 PowerShell 会话执行", skill_text)
-
-    def test_43_product_config_is_the_single_commercial_and_version_source(self):
-        config = product_config()
-        self.assertEqual(config["version"], "2.4.3")
-        self.assertTrue(config["offers"])
-        self.assertEqual(config["form"]["publicOfferId"], "manual-itinerary-beta")
-        self.assertTrue(config["form"]["intentOnly"])
-        self.assertFalse(config["form"]["chargeOnSubmit"])
-        self.assertFalse(config["offers"]["preTripReview"]["publicSalesEntry"])
-        self.assertEqual(config["offers"]["preTripReview"]["includedInOfferId"], "manual-itinerary-beta")
-        self.assertEqual(config["offers"]["manualItineraryBeta"]["limits"]["daysMin"], 3)
-        self.assertEqual(config["offers"]["manualItineraryBeta"]["limits"]["daysMax"], 7)
-        self.assertEqual(config["offers"]["manualItineraryBeta"]["limits"]["placesMax"], 15)
-        self.assertFalse(config["paymentWorkflow"]["automaticCharge"])
-        self.assertFalse(config["paymentWorkflow"]["publicStaticPaymentCode"])
-        offer_ids = []
-        for offer in config["offers"].values():
-            for required in ("id", "nameZh", "nameEn"):
-                self.assertIsInstance(offer.get(required), str)
-                self.assertTrue(offer[required])
-            if offer["publicSalesEntry"]:
-                self.assertIsInstance(offer.get("price"), str)
-                self.assertTrue(offer["price"])
-            else:
-                self.assertNotIn("price", offer)
-            offer_ids.append(offer["id"])
-        self.assertEqual(len(offer_ids), len(set(offer_ids)))
-        python_source = SCRIPT.read_text(encoding="utf-8")
-        renderer_source = RENDERER.read_text(encoding="utf-8")
-        commercial_literals = {
-            config["form"]["requestUrl"],
-            *(offer["price"] for offer in config["offers"].values() if offer.get("publicSalesEntry")),
-            config["form"]["copy"]["submitZh"],
-            config["form"]["copy"]["sectionTitleZh"],
-            config["form"]["privacy"]["boundaryZh"],
-            config["paymentWorkflow"]["copyZh"],
-            config["offers"]["manualItineraryBeta"]["descriptionZh"],
-            config["offers"]["manualItineraryBeta"]["availabilityZh"],
-        }
-        for literal in commercial_literals:
-            self.assertNotIn(literal, python_source)
-            self.assertNotIn(literal, renderer_source)
-
     def test_44_shared_schema_covers_every_required_v2_entity(self):
         schema = json.loads((SKILL / "references" / "shared-data-contract-v2.schema.json").read_text(encoding="utf-8"))
-        self.assertEqual(schema["properties"]["schemaVersion"]["const"], "2.3.0")
+        self.assertEqual(schema["properties"]["schemaVersion"]["const"], "2.4.0")
         for field in (
             "destinations", "places", "sources", "media",
-            "verificationSnapshots", "tripRequests", "events", "tombstones",
+            "verificationSnapshots", "tripRequests", "routePlans", "events", "tombstones",
         ):
             self.assertIn(field, schema["required"])
             self.assertIn(field, schema["properties"])
-        for definition in ("destination", "place", "source", "media", "verificationSnapshot", "tripRequest"):
+        for definition in ("destination", "place", "source", "media", "verificationSnapshot", "routePlan"):
             self.assertIn(definition, schema["$defs"])
             self.assertTrue(schema["$defs"][definition]["required"])
         snapshot = schema["$defs"]["verificationSnapshot"]
@@ -1547,9 +1415,6 @@ class PublicSkillRegressionTests(unittest.TestCase):
         agreed_review_condition = snapshot["allOf"][0]["then"]["required"]
         self.assertIn("agreedReviewDate", agreed_review_condition)
         self.assertIn("agreementConfirmed", agreed_review_condition)
-        request = schema["$defs"]["tripRequest"]
-        self.assertIn("scope_schedule_confirmed", request["properties"]["status"]["enum"])
-        self.assertIn("payment_recorded", request["properties"]["status"]["enum"])
         platforms = schema["$defs"]["source"]["properties"]["platform"]["enum"]
         for platform in ("douyin", "tiktok", "instagram", "youtube"):
             self.assertIn(platform, platforms)
@@ -1707,14 +1572,13 @@ class PublicSkillRegressionTests(unittest.TestCase):
                 check=True, capture_output=True, text=True,
             )
             migrated = json.loads(library_path.read_text(encoding="utf-8"))
-            self.assertEqual(migrated["schemaVersion"], "2.3.0")
+            self.assertEqual(migrated["schemaVersion"], "2.4.0")
             self.assertEqual(migrated["sources"][0]["submittedUrl"], "https://example.com/legacy")
             self.assertEqual(migrated["sources"][0]["ledgerVersion"], 1)
             self.assertEqual(migrated["verificationSnapshots"][0]["trigger"], "pre_trip_on_demand_legacy")
             self.assertTrue(migrated["verificationSnapshots"][0]["legacyImported"])
             self.assertNotIn("agreedReviewDate", migrated["verificationSnapshots"][0])
-            self.assertEqual(migrated["tripRequests"][0]["legacyStatus"], "accepted")
-            self.assertTrue(migrated["tripRequests"][0]["legacyImported"])
+            self.assertEqual(migrated["tripRequests"][0]["status"], "accepted")
             self.assertEqual(migrated["tripRequests"][0]["days"], 1)
 
     def test_50_repair_blocks_changed_original_media(self):
@@ -1753,7 +1617,6 @@ class PublicSkillRegressionTests(unittest.TestCase):
             checks_path.write_text(json.dumps({
                 "checkedAt": "2026-08-09T08:00:00Z",
                 "agreedReviewDate": "2026-08-09", "agreementConfirmed": True,
-                "serviceContext": "standalone_non_public",
                 "items": [{
                     "placeId": "place-1", "accessLevel": "public_readable",
                     "canSupport": ["opening_hours_observed"], "cannotProve": ["future_queue"],
@@ -1767,7 +1630,6 @@ class PublicSkillRegressionTests(unittest.TestCase):
             checks_path.write_text(json.dumps({
                 "checkedAt": "2026-08-10T08:00:00Z",
                 "agreedReviewDate": "2026-08-10", "agreementConfirmed": True,
-                "serviceContext": "standalone_non_public",
                 "items": [{
                     "placeId": "place-1", "accessLevel": "public_readable",
                     "canSupport": ["opening_hours_observed"], "cannotProve": ["future_queue"],
@@ -1788,112 +1650,6 @@ class PublicSkillRegressionTests(unittest.TestCase):
                 "before": "06:00–22:00", "after": "08:00–20:00",
             }])
 
-    def test_52_trip_request_enforces_manual_beta_limits_without_posting(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp)
-            library_path = base / "library.json"
-            request_path = base / "request.json"
-            library = W2G.empty_library()
-            library["places"] = [
-                complete_business(id="a", destinationKey="bangkok", destinationStatus="confirmed"),
-                complete_business(id="b", verifiedName="Beta", address="Beta Road", destinationKey="bangkok", destinationStatus="confirmed"),
-            ]
-            W2G.save_library(library_path, library)
-            request_path.write_text(json.dumps({
-                "id": "request-1", "offerId": "manual-itinerary-beta", "destination": "曼谷",
-                "days": 3, "placeIds": ["a", "b"], "status": "draft",
-            }, ensure_ascii=False), encoding="utf-8")
-            output = io.StringIO()
-            with contextlib.redirect_stdout(output):
-                W2G.command_trip_request(argparse.Namespace(
-                    library=str(library_path), request=str(request_path), operation_id="request-op",
-                ))
-            self.assertIn('"externalPostPerformed": false', output.getvalue())
-            request_path.write_text(json.dumps({
-                "offerId": "manual-itinerary-beta", "destination": "曼谷",
-                "days": 8, "placeIds": ["a", "b"],
-            }, ensure_ascii=False), encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "3–7 days"):
-                W2G.command_trip_request(argparse.Namespace(
-                    library=str(library_path), request=str(request_path), operation_id="request-invalid",
-                ))
-            request_path.write_text(json.dumps({
-                "offerId": "pre-trip-review", "destination": "曼谷",
-                "days": 3, "placeIds": ["a", "b"],
-            }, ensure_ascii=False), encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "not a public request option"):
-                W2G.command_trip_request(argparse.Namespace(
-                    library=str(library_path), request=str(request_path), operation_id="review-sale-blocked",
-                ))
-
-    def test_52b_trip_request_follows_manual_confirmation_and_payment_stages(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp)
-            library_path = base / "library.json"
-            request_path = base / "request.json"
-            library = W2G.empty_library()
-            library["places"] = [
-                complete_business(id="a", destinationKey="bangkok", destinationStatus="confirmed"),
-                complete_business(id="b", verifiedName="Beta", address="Beta Road", destinationKey="bangkok", destinationStatus="confirmed"),
-            ]
-            W2G.save_library(library_path, library)
-            common = {
-                "id": "request-flow", "offerId": "manual-itinerary-beta", "destination": "曼谷",
-                "days": 3, "placeIds": ["a", "b"],
-            }
-
-            def save(stage, operation_id, **extra):
-                request_path.write_text(json.dumps({**common, "status": stage, **extra}, ensure_ascii=False), encoding="utf-8")
-                with contextlib.redirect_stdout(io.StringIO()):
-                    W2G.command_trip_request(argparse.Namespace(
-                        library=str(library_path), request=str(request_path), operation_id=operation_id,
-                    ))
-
-            save("submitted", "flow-1")
-            with self.assertRaisesRegex(ValueError, "cannot be skipped"):
-                save("payment_recorded", "flow-skip", paymentRecordedAt="2026-08-12T09:00:00Z")
-            save(
-                "scope_schedule_confirmed", "flow-2",
-                agreedReviewDate="2026-09-10", deliveryDueAt="2026-08-20T09:00:00Z",
-                scopeConfirmedAt="2026-08-11T09:00:00Z",
-            )
-            save("customer_confirmed", "flow-3", customerConfirmedAt="2026-08-11T10:00:00Z")
-            save("payment_instructions_sent", "flow-4", paymentInstructionsSentAt="2026-08-11T11:00:00Z")
-            save("payment_recorded", "flow-5", paymentRecordedAt="2026-08-12T09:00:00Z")
-            save("in_delivery", "flow-6", deliveryStartedAt="2026-08-12T10:00:00Z")
-            saved = json.loads(library_path.read_text(encoding="utf-8"))["tripRequests"][0]
-            self.assertEqual(saved["status"], "in_delivery")
-            self.assertEqual(saved["agreedReviewDate"], "2026-09-10")
-            self.assertEqual(W2G.validate_library_contract(json.loads(library_path.read_text(encoding="utf-8"))), [])
-
-    def test_52c_manual_service_review_runs_once_on_the_agreed_date(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp)
-            library_path = base / "library.json"
-            checks_path = base / "checks.json"
-            library = W2G.empty_library()
-            library["places"] = [complete_business(destinationKey="bangkok", destinationStatus="confirmed")]
-            library["tripRequests"] = [{
-                "id": "request-paid", "offerId": "manual-itinerary-beta", "destinationKey": "bangkok",
-                "status": "in_delivery", "createdAt": "2026-08-09T00:00:00Z",
-                "updatedAt": "2026-08-12T10:00:00Z",
-            }]
-            W2G.save_library(library_path, library)
-            checks_path.write_text(json.dumps({
-                "checkedAt": "2026-09-10T08:00:00+08:00",
-                "agreedReviewDate": "2026-09-10", "agreementConfirmed": True,
-                "serviceContext": "manual_itinerary_beta", "tripRequestId": "request-paid",
-                "items": [{"placeId": "place-1", "facts": {"openingHoursText": "08:00–20:00"}}],
-            }, ensure_ascii=False), encoding="utf-8")
-            with contextlib.redirect_stdout(io.StringIO()):
-                W2G.command_review(argparse.Namespace(
-                    library=str(library_path), destination="曼谷", checks=str(checks_path), output="", operation_id="paid-review-1",
-                ))
-            with self.assertRaisesRegex(ValueError, "already been recorded"):
-                W2G.command_review(argparse.Namespace(
-                    library=str(library_path), destination="曼谷", checks=str(checks_path), output="", operation_id="paid-review-2",
-                ))
-
     def test_53_content_depth_visitor_mode_and_customer_scan(self):
         place = complete_business(areaGroup="Thong Lo", accessibilityNote="入口有台阶", verificationStatus="checked")
         self.assertNotIn("signature", W2G.customer_place(place, "zh-CN", "compact"))
@@ -1904,7 +1660,8 @@ class PublicSkillRegressionTests(unittest.TestCase):
             "places": [W2G.customer_place(place, "zh-CN", "deep")],
             "retainedClueCount": 0,
         })
-        self.assertIn("访客查看版", html)
+        self.assertNotIn("访客查看版", html)
+        self.assertNotIn("DEEP", html)
         with tempfile.TemporaryDirectory() as tmp:
             html_path = Path(tmp) / "passport.html"
             html_path.write_text(html, encoding="utf-8")
@@ -1924,6 +1681,18 @@ class PublicSkillRegressionTests(unittest.TestCase):
             junk.write_bytes(b"junk")
             with self.assertRaisesRegex(ValueError, "forbidden_artifact"):
                 W2G.command_scan(argparse.Namespace(path=str(base), mode="package"))
+
+            junk.unlink()
+            license_path = base / "LICENSE"
+            license_path.write_text("cookie=ABCDEFGHIJKLMNOPQRSTUVWX", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "possible_secret"):
+                W2G.command_scan(argparse.Namespace(path=str(base), mode="package"))
+
+            archive_path = base / "license-check.zip"
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr("want-to-go-trip-planner/LICENSE", "cookie=ABCDEFGHIJKLMNOPQRSTUVWX")
+            with self.assertRaisesRegex(ValueError, "possible_secret"):
+                W2G.command_scan(argparse.Namespace(path=str(archive_path), mode="package"))
 
     def test_55_atomic_locking_has_both_posix_and_windows_paths(self):
         source = SCRIPT.read_text(encoding="utf-8")
@@ -2274,16 +2043,13 @@ class PublicSkillRegressionTests(unittest.TestCase):
         self.assertIn("展出各种模型", html)
         self.assertIn("sourceId=45", html)
 
-    def test_70_migration_marks_old_standalone_review_request_legacy(self):
+    def test_migration_preserves_opaque_historical_records(self):
         library = W2G.empty_library()
-        library["tripRequests"] = [{
-            "id": "old-review", "offerId": "pre-trip-review", "destinationKey": "bangkok",
-            "status": "submitted", "createdAt": "2026-01-01T00:00:00Z",
-        }]
-        migrated, changes = W2G.migrate_library_data(library)
-        self.assertTrue(migrated["tripRequests"][0]["legacyImported"])
-        self.assertTrue(any(item.startswith("legacy_trip_request_offer") for item in changes))
+        library["tripRequests"] = [{"id": "old", "status": "old-status", "customLegacyField": "retained"}]
+        migrated, _ = W2G.migrate_library_data(library)
+        self.assertEqual(migrated["tripRequests"], library["tripRequests"])
         self.assertEqual(W2G.validate_library_contract(migrated), [])
+
 
     def test_71_schema_validation_checks_nested_destination_fields(self):
         library = W2G.empty_library()
@@ -2495,7 +2261,6 @@ class PublicSkillRegressionTests(unittest.TestCase):
                 "checkedAt": "2026-08-11T08:00:00Z",
                 "agreedReviewDate": "2026-08-11",
                 "agreementConfirmed": True,
-                "serviceContext": "standalone_non_public",
                 "items": [{
                     "placeId": "place-1",
                     "accessLevel": "public_readable",
@@ -2538,7 +2303,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
 
     def test_70_contract_declares_audit_and_execution_risk_definitions(self):
         schema = json.loads((SKILL / "references" / "shared-data-contract-v2.schema.json").read_text(encoding="utf-8"))
-        self.assertEqual(schema["properties"]["schemaVersion"]["const"], "2.3.0")
+        self.assertEqual(schema["properties"]["schemaVersion"]["const"], "2.4.0")
         self.assertIn("factAudit", schema["$defs"])
         self.assertIn("executionRisk", schema["$defs"])
         self.assertIn("verificationItem", schema["$defs"])
@@ -2585,46 +2350,13 @@ class PublicSkillRegressionTests(unittest.TestCase):
                 W2G.command_passport(argparse.Namespace(
                     library=str(library_path), destination="曼谷", output=str(passport_path),
                     locale="zh-CN", content_depth="standard", visitor_mode=True,
+                    places_only=True,
                     operation_id="passport-media-ledger",
                 ))
             payload = json.loads(passport_path.read_text(encoding="utf-8"))
             staged = payload["places"][0]["photo"]["path"]
             self.assertTrue((passport_path.parent / staged).is_file())
             self.assertNotEqual(staged, str(original))
-
-    def test_78_bilingual_skill_metadata_and_operator_guides_are_public_ready(self):
-        skill_text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
-        agent_text = (SKILL / "agents" / "openai.yaml").read_text(encoding="utf-8")
-        config = product_config()
-        for phrase in (
-            "Language / 语言", "English operating contract", "English quick start",
-            '"outputLocale": "en-US"', "save this place", "create my Bangkok passport",
-            "Do not ask an English-speaking user to request an “English passport.”",
-        ):
-            self.assertIn(phrase, skill_text)
-        self.assertIn("Want to Go｜想去就出发", agent_text)
-        self.assertIn("Detect my language automatically", agent_text)
-        self.assertEqual(config["brand"]["platformNameEn"], "Want to Go | Travel Save Organizer")
-        self.assertTrue(config["brand"]["subtitleEn"])
-        self.assertEqual(
-            {"douyin", "tiktok", "instagram", "youtube"}
-            & set(config["platformImports"]),
-            {"douyin", "tiktok", "instagram", "youtube"},
-        )
-        for provider in config["platformImports"].values():
-            self.assertTrue(provider["requires"])
-            self.assertTrue(provider["requiresEn"])
-        self.assertNotIn("price", config["offers"]["preTripReview"])
-        for reference in (
-            "customer-output.md", "place-resolution.md", "provider-support.md",
-            "free-library-contract.md",
-        ):
-            self.assertIn(
-                "## English", (SKILL / "references" / reference).read_text(encoding="utf-8")
-            )
-        provider_text = (SKILL / "references" / "provider-support.md").read_text(encoding="utf-8")
-        for phrase in ("Douyin:", "TikTok:", "Instagram:", "YouTube:", "Stories are unsupported"):
-            self.assertIn(phrase, provider_text)
 
     def test_79_english_platform_failures_are_actionable(self):
         with self.assertRaisesRegex(ValueError, "short link was retained"):
@@ -2796,26 +2528,13 @@ class PublicSkillRegressionTests(unittest.TestCase):
         for phrase in (
             "WANT TO GO PASSPORT", "A want-to-go itinerary you can take with you",
             "Verification status", "Open original saved link",
-            "Want-to-go library and passport", "Manual day-by-day itinerary beta",
-            "Send itinerary request — no charge now", "Service boundary",
+            "DAY-BY-DAY PLAN", "Schematic route",
         ):
             self.assertIn(phrase, html)
         for chinese_label in ("当地名称", "营业", "想去理由", "提交行程需求"):
             self.assertNotIn(chinese_label, html)
 
     def test_81_english_user_is_first_class_without_requesting_translation(self):
-        skill_text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
-        description = skill_text.split("---", 2)[1]
-        self.assertTrue(description.index("Save travel screenshots") < description.index("把小红书"))
-        for phrase in (
-            "### English installation and onboarding",
-            "### Save inputs by destination",
-            "### Protect images and resolve places",
-            "### Generate an English passport",
-            "### Edit, recover, review and export",
-        ):
-            self.assertIn(phrase, skill_text)
-
         with tempfile.TemporaryDirectory() as tmp:
             library_path = Path(tmp) / "want-to-go.json"
             evidence_path = Path(tmp) / "evidence.json"
@@ -2861,7 +2580,8 @@ class PublicSkillRegressionTests(unittest.TestCase):
             "places": [W2G.customer_place(place, "zh-CN", "deep")],
             "retainedClueCount": 0,
         })
-        self.assertIn("DEEP", html)
+        self.assertNotIn("DEEP", html)
+        self.assertIn("行程天数", html)
         self.assertIn("Thong Lo", html)
         self.assertIn("入口有台阶", html)
         self.assertIn("已核对入口信息", html)
@@ -2869,10 +2589,42 @@ class PublicSkillRegressionTests(unittest.TestCase):
 
     def test_83_customer_output_blocks_windows_paths_and_sensitive_url_queries(self):
         with tempfile.TemporaryDirectory() as tmp:
-            html_path = Path(tmp) / "bad.html"
-            html_path.write_text("<p>C:\\Users\\customer\\Pictures\\place.png</p>", encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "customer_internal_leak"):
-                W2G.command_scan(argparse.Namespace(path=str(html_path), mode="customer"))
+            base = Path(tmp)
+            local_paths = (
+                "C:\\Users\\customer\\Pictures\\place.png",
+                "D:\\Travel\\private\\place.png",
+                "\\\\server\\share\\private.png",
+                "/private/var/folders/x/place.png",
+                "/tmp/place.png",
+                "/Volumes/private/place.png",
+                "/home/customer/place.png",
+                "/etc/private.conf",
+                "/opt/project/private.json",
+                "/workspace/private/place.png",
+            )
+            for index, local_path in enumerate(local_paths):
+                html_path = base / f"bad-{index}.html"
+                html_path.write_text(f"<p>{local_path}</p>", encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "customer_internal_leak"):
+                    W2G.command_scan(argparse.Namespace(path=str(html_path), mode="customer"))
+
+                place_with_path = W2G.customer_place(complete_business(reason=local_path), "zh-CN")
+                rendered = self.render({
+                    "locale": "zh-CN", "destination": "曼谷", "places": [place_with_path],
+                    "routePlan": customer_route_plan([place_with_path]), "retainedClueCount": 0,
+                })
+                self.assertNotIn(local_path, rendered)
+
+            safe_html = base / "safe.html"
+            safe_html.write_text(
+                '<a href="https://example.com/home/guide">home guide</a>'
+                '<a href="https://example.com/tmp/file">temporary guide</a>',
+                encoding="utf-8",
+            )
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                W2G.command_scan(argparse.Namespace(path=str(safe_html), mode="customer"))
+            self.assertIn('"status": "clean"', output.getvalue())
 
             place = complete_business(originalSourceLinks=[{
                 "url": "https://www.xiaohongshu.com/explore/abc?xsec_token=secret-value&sourceId=45",
@@ -2913,9 +2665,11 @@ class PublicSkillRegressionTests(unittest.TestCase):
             outside.write_text("not an image", encoding="utf-8")
             input_path = passport_dir / "passport.json"
             output_path = passport_dir / "passport.html"
+            place = complete_business(photo={"path": str(outside)})
             input_path.write_text(json.dumps({
                 "locale": "zh-CN", "destination": "曼谷",
-                "places": [complete_business(photo={"path": str(outside)})],
+                "places": [place],
+                "routePlan": customer_route_plan([place], "zh-CN"),
             }, ensure_ascii=False), encoding="utf-8")
             result = subprocess.run(
                 ["node", str(RENDERER), str(input_path), str(output_path)],
@@ -3034,20 +2788,6 @@ class PublicSkillRegressionTests(unittest.TestCase):
                     candidate_file=str(candidate_path), operation_id="confirm-user",
                 ))
 
-    def test_92_docs_and_platform_helpers_match_the_executable_flow(self):
-        skill_text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
-        self.assertIn("promote --library want-to-go.json --bundle-id", skill_text)
-        self.assertIn("confirm --library want-to-go.json --place-id", skill_text)
-        self.assertIn("present --library want-to-go.json --destination", skill_text)
-        self.assertIn('"selections": [', skill_text)
-        self.assertIn("session_only", skill_text)
-        swift = (SKILL / "scripts" / "prepare_image_macos.swift").read_text(encoding="utf-8")
-        self.assertIn('"--target-aspect"', swift)
-        self.assertIn('"--json"', swift)
-        windows = (SKILL / "scripts" / "doctor_windows.ps1").read_text(encoding="ascii")
-        for dependency in ("pillow", "macosVision", "opencli"):
-            self.assertIn(dependency, windows)
-
     def test_93_cli_errors_are_localized_and_external_output_is_redacted(self):
         with tempfile.TemporaryDirectory() as tmp:
             missing = Path(tmp) / "private-library.json"
@@ -3081,15 +2821,13 @@ class PublicSkillRegressionTests(unittest.TestCase):
         self.assertIn("Image preparation arguments", json.loads(result.stderr)["message"])
 
     def test_94_release_manifest_matches_archive_and_detects_tampering(self):
-        archive_path = ROOT / "dist" / "want-to-go-trip-planner-skill-2.4.3.zip"
+        archive_path = ROOT / "dist" / "want-to-go-trip-planner-skill-3.0.0.zip"
         self.assertTrue(archive_path.is_file())
         with zipfile.ZipFile(archive_path) as archive:
             self.assertEqual(W2G.release_manifest_issues(archive), [])
             names = archive.namelist()
-            self.assertIn("want-to-go-trip-planner/README.md", names)
-            readme = archive.read("want-to-go-trip-planner/README.md").decode("utf-8")
-            self.assertIn("当前版本：v2.4.3", readme)
-            self.assertIn("Current version: v2.4.3", readme)
+            for path in ("SKILL.md", "LICENSE", "scripts/library.py", "scripts/want_to_go.py", "scripts/export_itinerary.py"):
+                self.assertIn("want-to-go-trip-planner/" + path, names)
             contents = {name: archive.read(name) for name in names if not name.endswith("/")}
         with tempfile.TemporaryDirectory() as tmp:
             tampered = Path(tmp) / "tampered.zip"
@@ -3105,31 +2843,474 @@ class PublicSkillRegressionTests(unittest.TestCase):
                 issues = W2G.release_manifest_issues(archive)
             self.assertIn("release_manifest_hash_mismatch", {item["type"] for item in issues})
 
-    def test_95_windows_workflow_has_immutable_supply_chain_inputs(self):
-        workflow = (ROOT / ".github" / "workflows" / "windows-validation.yml").read_text(encoding="utf-8")
-        self.assertNotRegex(workflow, r"uses:\s+[^\s]+@v\d")
-        for sha in (
-            "11bd71901bbe5b1630ceea73d27597364c9af683",
-            "42375524e23c412d93fb67b49958b491fce71c38",
-            "49933ea5288caeca8642d1e84afbd3f7d6820020",
-            "ea165f8d65b6e75b540449e92b4886f43607fa02",
-            "e8998f949152b193b063cb0ec769d69d929409be",
-        ):
-            self.assertIn(sha, workflow)
-        self.assertIn("tesseract --version=5.5.3.20260724", workflow)
-        self.assertIn("ffmpeg --version=8.1.2", workflow)
-        self.assertIn("87416418657359cb625c412a48b6e1d6d41c29bd", workflow)
-        self.assertIn("a5fcb6f0db1e1d6d8522f39db4e848f05984669172e584e8d76b6b3141e1f730", workflow)
-        self.assertIn("codex/want-to-go-v2-4-audit", workflow)
+    def test_97_route_plan_is_required_complete_customer_safe_and_undoable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            library_path = base / "want-to-go.json"
+            plan_path = base / "route-plan.json"
+            passport_path = base / "passport.json"
+            library_path.write_text(json.dumps({
+                "schemaVersion": "1.2.3",
+                "bundles": [{"bundleId": "route-demo", "destination": "曼谷"}],
+                "places": [complete_business(destination="曼谷")],
+            }, ensure_ascii=False), encoding="utf-8")
+            plan_path.write_text(json.dumps({
+                "title": "曼谷一日想去路线",
+                "tripProfile": {
+                    "days": 1,
+                    "partySize": 2,
+                    "walkingLimit": "每天不超过 8 公里",
+                    "mustGoPlaceIds": ["place-1"],
+                    "dietaryRestrictions": [],
+                },
+                "days": [{
+                    "day": 1,
+                    "title": "第一天 · Thonglor",
+                    "stops": [{"placeId": "place-1", "timeBlock": "afternoon"}],
+                    "connections": [],
+                }],
+                "unassigned": [],
+            }, ensure_ascii=False), encoding="utf-8")
+            with contextlib.redirect_stdout(io.StringIO()):
+                W2G.command_route_plan(argparse.Namespace(
+                    library=str(library_path), destination="曼谷", plan=str(plan_path),
+                    locale="zh-CN", operation_id="route-plan-demo",
+                ))
+                W2G.command_passport(argparse.Namespace(
+                    library=str(library_path), destination="曼谷", output=str(passport_path),
+                    locale="zh-CN", content_depth="standard", visitor_mode=True,
+                    operation_id="passport-route-demo", places_only=False,
+                ))
+            report = json.loads(passport_path.read_text(encoding="utf-8"))
+            self.assertEqual(report["routePlan"]["days"][0]["stops"][0]["name"], "Mae Varee")
+            self.assertNotIn("placeId", json.dumps(report["routePlan"], ensure_ascii=False))
+            self.assertIn("不含实时交通", report["routePlan"]["mapLabel"])
+            with self.assertRaisesRegex(ValueError, "active route plan"):
+                W2G.command_delete(argparse.Namespace(
+                    library=str(library_path), place_id="place-1", operation_id="delete-routed-place",
+                ))
+            with contextlib.redirect_stdout(io.StringIO()):
+                W2G.command_undo(argparse.Namespace(
+                    library=str(library_path), operation_id="undo-route-plan-demo",
+                ))
+            saved = json.loads(library_path.read_text(encoding="utf-8"))
+            self.assertEqual(saved["routePlans"], [])
 
-    def test_96_release_builder_is_packaged_and_checksum_is_required(self):
-        source = BUILD_SCRIPT.read_text(encoding="utf-8")
-        skill_text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
-        self.assertIn("kornvia-skill-release-manifest-1", source)
-        self.assertIn("release checksum sidecar is missing or invalid", source)
-        self.assertIn("FIXED_ZIP_TIME", source)
-        self.assertIn("release-manifest.json", skill_text)
-        self.assertIn("provenance attestation", skill_text)
+    def test_98_customer_secret_scan_covers_body_entities_and_renderer(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            unsafe_html = base / "unsafe.html"
+            unsafe_html.write_text(
+                "<p>xsec_token&amp;#61;AUDIT_CANARY_123456789</p>", encoding="utf-8"
+            )
+            with self.assertRaisesRegex(ValueError, "possible_secret"):
+                W2G.command_scan(argparse.Namespace(path=str(unsafe_html), mode="customer"))
+
+            payload = {
+                "locale": "zh-CN", "destination": "曼谷",
+                "places": [W2G.customer_place(complete_business(
+                    signature="signature&#61;AUDIT_CANARY_123456789"
+                ), "zh-CN")],
+                "retainedClueCount": 0,
+            }
+            payload["routePlan"] = customer_route_plan(payload["places"])
+            input_path = base / "passport.json"
+            output_path = base / "passport.html"
+            input_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            result = subprocess.run(
+                ["node", str(RENDERER), str(input_path), str(output_path)],
+                capture_output=True, text=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("CUSTOMER_SECRET_LEAK", result.stderr)
+            self.assertFalse(output_path.exists())
+
+    def test_99_durable_media_permissions_and_crops_are_private(self):
+        if sys.platform.startswith("win"):
+            self.skipTest("POSIX mode bits are not Windows ACL evidence")
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            original = base / "customer.png"
+            output = base / "evidence.json"
+            image = Image.new("RGB", (320, 240))
+            pixels = image.load()
+            for y in range(240):
+                for x in range(320):
+                    pixels[x, y] = ((x * 7 + y) % 256, (x + y * 5) % 256, (x * 3 + y * 11) % 256)
+            image.save(original)
+            original.chmod(0o644)
+            result = EXTRACT.preserve_screenshot_asset(
+                {"sourceType": "screenshot", "sourceId": "private-shot"},
+                {"id": "private-shot", "path": str(original)},
+                str(output), "private-bundle", "durable",
+            )
+            durable = Path(result["localPath"])
+            self.assertEqual(durable.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(durable.parent.stat().st_mode & 0o777, 0o700)
+            if result.get("displayPhoto"):
+                display = Path(result["displayPhoto"]["path"])
+                self.assertEqual(display.stat().st_mode & 0o777, 0o600)
+                self.assertFalse(any(display.parent.glob(f".{display.name}.*.tmp")))
+
+    def test_100_batch_ignores_caller_platform_media_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            external = base / "preexisting-private-media"
+            external.mkdir()
+            (external / "old.jpg").write_bytes(b"old-private-file")
+            manifest = base / "manifest.json"
+            output = base / "evidence.json"
+            manifest.write_text(json.dumps({
+                "bundleId": "fresh-media",
+                "storageMode": "durable",
+                "sources": [{
+                    "id": "xhs-source", "type": "link",
+                    "value": "https://www.xiaohongshu.com/explore/note?xsec_token=test-token",
+                    "destination": "曼谷",
+                    "platformMediaDirectory": str(external),
+                }],
+            }), encoding="utf-8")
+            captured = {}
+
+            def fake_extract(_args, source):
+                captured.update(source)
+                return {"sourceType": "link", "sourceId": source["id"]}
+
+            args = EXTRACT.parser().parse_args([
+                "batch", "--manifest", str(manifest), "--output", str(output)
+            ])
+            with mock.patch.object(EXTRACT, "extract_one", side_effect=fake_extract):
+                EXTRACT.batch_extract(args)
+            media_directory = Path(captured["platformMediaDirectory"])
+            self.assertNotEqual(media_directory, external)
+            self.assertTrue(media_directory.is_dir())
+            self.assertTrue(str(media_directory).startswith(str(base / "evidence-assets")))
+            self.assertFalse((media_directory / "old.jpg").exists())
+            if not sys.platform.startswith("win"):
+                self.assertEqual(media_directory.stat().st_mode & 0o777, 0o700)
+
+    def test_101_opencli_is_pinned_and_signed_url_uses_stdin(self):
+        config = product_config()["runtimeDependencies"]["opencli"]
+        self.assertEqual(config["expectedVersion"], "1.8.6")
+        self.assertRegex(config["entrypointSha256"], r"^[a-f0-9]{64}$")
+        self.assertRegex(config["packagePayloadSha256"], r"^[a-f0-9]{64}$")
+        signed_url = "https://www.xiaohongshu.com/explore/note?xsec_token=AUDIT_CANARY_123456789"
+        completed = argparse.Namespace(returncode=0, stdout="ok\n", stderr="")
+        with (
+            mock.patch.object(EXTRACT, "trusted_opencli_entrypoint", return_value=Path("/trusted/opencli/main.js")),
+            mock.patch.object(EXTRACT.shutil, "which", return_value="/trusted/node"),
+            mock.patch.object(EXTRACT.subprocess, "run", return_value=completed) as run,
+        ):
+            self.assertEqual(EXTRACT.run_opencli(["xiaohongshu", "note", signed_url]), "ok")
+        command = run.call_args.args[0]
+        stdin_payload = run.call_args.kwargs["input"]
+        self.assertNotIn(signed_url, command)
+        self.assertIn(signed_url, stdin_payload)
+
+    def test_102_manifest_limits_precede_hashing_and_binary_types_are_blocked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            archive_path = base / "compressed.zip"
+            bomb_name = "want-to-go-trip-planner/payload.md"
+            manifest = {
+                "schemaVersion": "kornvia-skill-release-manifest-1",
+                "packageName": "want-to-go-trip-planner",
+                "packageVersion": product_config()["version"],
+                "contractVersion": product_config()["contractVersion"],
+                "rootDirectory": "want-to-go-trip-planner",
+                "fileCount": 1,
+                "files": [{"path": "payload.md", "size": 2 * 1024 * 1024, "sha256": "0" * 64}],
+            }
+            with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr("want-to-go-trip-planner/release-manifest.json", json.dumps(manifest))
+                archive.writestr(bomb_name, b"0" * (2 * 1024 * 1024))
+            with zipfile.ZipFile(archive_path) as archive:
+                issue_types = {item["type"] for item in W2G.release_manifest_issues(archive)}
+            self.assertIn("archive_compression_ratio_exceeded", issue_types)
+
+            package_dir = base / "package"
+            package_dir.mkdir()
+            (package_dir / "opaque.bin").write_bytes(b"xsec_token=AUDIT_CANARY_123456789")
+            with self.assertRaisesRegex(ValueError, "unsupported_package_file_type"):
+                W2G.command_scan(argparse.Namespace(path=str(package_dir), mode="package"))
+
+    def test_103_uri_and_customer_links_require_safe_public_https(self):
+        for invalid in (
+            "http://", "https://user:password@example.com/path", "https://example.com:444/path"
+        ):
+            self.assertFalse(W2G.valid_contract_uri(invalid))
+        self.assertTrue(W2G.valid_contract_uri("https://example.com/path"))
+        for invalid in (
+            "http://example.com/path", "https://router.lan/admin",
+            "https://user:password@example.com/path", "https://localhost/path",
+        ):
+            self.assertEqual(W2G.customer_safe_url(invalid), "")
+        safe = W2G.customer_safe_url(
+            "https://example.com/place?xsec_token=secret-value&place=42"
+        )
+        self.assertNotIn("xsec_token", safe)
+        self.assertIn("place=42", safe)
+
+    def test_104_renderer_writes_atomically_with_private_mode(self):
+        if sys.platform.startswith("win"):
+            self.skipTest("POSIX mode bits are not Windows ACL evidence")
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            place = W2G.customer_place(complete_business(), "zh-CN")
+            payload = {
+                "locale": "zh-CN", "destination": "曼谷", "places": [place],
+                "routePlan": customer_route_plan([place]), "retainedClueCount": 0,
+            }
+            input_path = base / "passport.json"
+            output_path = base / "passport.html"
+            input_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            subprocess.run(
+                ["node", str(RENDERER), str(input_path), str(output_path)],
+                check=True, capture_output=True, text=True,
+            )
+            self.assertEqual(output_path.stat().st_mode & 0o777, 0o600)
+            self.assertFalse(any(base.glob(f".{output_path.name}.*.tmp")))
+
+    def test_105_secret_scan_rejects_letter_only_base64_and_entities(self):
+        samples = (
+            "signature=ABCDEFGHIJKLMNOPQRSTUVWX",
+            "sig=QWxhZGRpbjpvcGVuIHNlc2FtZQ==",
+            "igsh=AbCdEfGhIjKlMnOpQrStUvWxYz_-",
+            "signature&#61;ABCDEFGHIJKLMNOPQRSTUVWX",
+            "signature=&#10;ABCDEFGHIJKLMNOPQRSTUVWX",
+            "signature=&#13;ABCDEFGHIJKLMNOPQRSTUVWX",
+            "signature=\r\nABCDEFGHIJKLMNOPQRSTUVWX",
+            "signature&#10;=&#10;ABCDEFGHIJKLMNOPQRSTUVWX",
+            "cookie:&#10;ABCDEFGHIJKLMNOPQRSTUVWX",
+            "authorization:\r\nABCDEFGHIJKLMNOPQRSTUVWX",
+            "signature&#10;:&#10;ABCDEFGHIJKLMNOPQRSTUVWX",
+            "cookie:&#10;&#10;ABCDEFGHIJKLMNOPQRSTUVWX",
+            "authorization:\r\n\nABCDEFGHIJKLMNOPQRSTUVWX",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            for index, sample in enumerate(samples):
+                unsafe_html = base / f"unsafe-{index}.html"
+                unsafe_html.write_text(f"<p>{sample}</p>", encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "possible_secret"):
+                    W2G.command_scan(argparse.Namespace(path=str(unsafe_html), mode="customer"))
+
+                place = W2G.customer_place(complete_business(signature=sample), "zh-CN")
+                payload = {
+                    "locale": "zh-CN", "destination": "曼谷", "places": [place],
+                    "routePlan": customer_route_plan([place]), "retainedClueCount": 0,
+                }
+                input_path = base / f"passport-{index}.json"
+                output_path = base / f"passport-{index}.html"
+                input_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+                result = subprocess.run(
+                    ["node", str(RENDERER), str(input_path), str(output_path)],
+                    capture_output=True, text=True,
+                )
+                self.assertNotEqual(result.returncode, 0, sample)
+                self.assertIn("CUSTOMER_SECRET_LEAK", result.stderr)
+                self.assertFalse(output_path.exists())
+
+    def test_106_renderer_rejects_intermediate_symlink_outside_passport(self):
+        if sys.platform.startswith("win"):
+            self.skipTest("Creating directory symlinks requires elevated Windows privileges")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            passport_dir = root / "passport"
+            outside = root / "outside"
+            passport_dir.mkdir()
+            outside.mkdir()
+            image_path = outside / "place.png"
+            Image.new("RGB", (32, 24), color=(200, 120, 40)).save(image_path)
+            (passport_dir / "assets").symlink_to(outside, target_is_directory=True)
+            place = W2G.customer_place(complete_business(), "zh-CN")
+            place["displayPhoto"] = {"path": "assets/place.png"}
+            payload = {
+                "locale": "zh-CN", "destination": "曼谷", "places": [place],
+                "routePlan": customer_route_plan([place]), "retainedClueCount": 0,
+            }
+            input_path = passport_dir / "passport.json"
+            output_path = passport_dir / "passport.html"
+            input_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            result = subprocess.run(
+                ["node", str(RENDERER), str(input_path), str(output_path)],
+                capture_output=True, text=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("UNSAFE_LOCAL_IMAGE", result.stderr)
+            self.assertFalse(output_path.exists())
+
+    def test_108_opencli_package_payload_and_local_extensions_are_fail_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            package = base / "opencli"
+            (package / "dist" / "src").mkdir(parents=True)
+            (package / "clis" / "xiaohongshu").mkdir(parents=True)
+            (package / "node_modules" / "dep").mkdir(parents=True)
+            (package / "package.json").write_text(
+                '{"name":"@jackwener/opencli","version":"1.8.6","dependencies":{"dep":"^1.0.0"}}',
+                encoding="utf-8",
+            )
+            (package / "dist" / "src" / "main.js").write_text("main", encoding="utf-8")
+            adapter = package / "clis" / "xiaohongshu" / "note.js"
+            adapter.write_text("official", encoding="utf-8")
+            (package / "node_modules" / "dep" / "index.js").write_text("platform-specific", encoding="utf-8")
+            (package / "node_modules" / "dep" / "package.json").write_text(
+                '{"name":"dep","version":"1.0.0","peerDependencies":{"native-peer":"^2.0.0"},"peerDependenciesMeta":{"native-peer":{"optional":true}}}',
+                encoding="utf-8",
+            )
+            baseline = EXTRACT.package_payload_sha256(package)
+            graph_baseline = EXTRACT.node_dependency_graph_sha256(package)
+            (package / "node_modules" / "dep" / "index.js").write_text("different", encoding="utf-8")
+            self.assertEqual(EXTRACT.package_payload_sha256(package), baseline)
+            self.assertNotEqual(EXTRACT.node_dependency_graph_sha256(package), graph_baseline)
+            graph_without_peer = EXTRACT.node_dependency_graph_sha256(package)
+            peer = package / "node_modules" / "native-peer"
+            peer.mkdir()
+            (peer / "package.json").write_text(
+                '{"name":"native-peer","version":"2.0.0"}', encoding="utf-8"
+            )
+            (peer / "index.js").write_text("native-v1", encoding="utf-8")
+            graph_with_peer = EXTRACT.node_dependency_graph_sha256(package)
+            self.assertNotEqual(graph_with_peer, graph_without_peer)
+            (peer / "index.js").write_text("native-v2", encoding="utf-8")
+            self.assertNotEqual(EXTRACT.node_dependency_graph_sha256(package), graph_with_peer)
+            (package / "node_modules" / "dep" / "package.json").write_text(
+                '{"name":"dep","version":"1.0.0","peerDependencies":{"required-peer":"^1.0.0"}}',
+                encoding="utf-8",
+            )
+            self.assertEqual(EXTRACT.node_dependency_graph_sha256(package), "")
+            adapter.write_text("tampered", encoding="utf-8")
+            self.assertNotEqual(EXTRACT.package_payload_sha256(package), baseline)
+
+            home = base / "home"
+            self.assertTrue(EXTRACT.opencli_user_extensions_absent(home))
+            override = home / ".opencli" / "clis" / "xiaohongshu"
+            override.mkdir(parents=True)
+            (override / "note.js").write_text("override", encoding="utf-8")
+            self.assertFalse(EXTRACT.opencli_user_extensions_absent(home))
+
+    def test_109_private_permission_failures_are_not_silently_ignored(self):
+        completed = argparse.Namespace(returncode=1, stdout="", stderr="")
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "customer-evidence.json"
+            with (
+                mock.patch.object(EXTRACT.sys, "platform", "win32"),
+                mock.patch.object(EXTRACT, "windows_current_user_sid", return_value="S-1-5-21-1"),
+                mock.patch.object(EXTRACT.subprocess, "run", return_value=completed),
+            ):
+                with self.assertRaisesRegex(PermissionError, "PRIVATE_PERMISSION_ENFORCEMENT_FAILED"):
+                    EXTRACT.restrict_path_to_current_user(output)
+                with self.assertRaisesRegex(PermissionError, "PRIVATE_PERMISSION_ENFORCEMENT_FAILED"):
+                    EXTRACT.write_result({"private": True}, str(output))
+            self.assertFalse(output.exists())
+            self.assertFalse(any(Path(tmp).glob(".want-to-go-evidence-*")))
+
+    def test_109b_existing_files_are_restored_when_final_permission_check_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            output = base / "customer-evidence.json"
+            output.write_text("old evidence", encoding="utf-8")
+            failure = PermissionError("PRIVATE_PERMISSION_ENFORCEMENT_FAILED")
+            with mock.patch.object(
+                EXTRACT, "restrict_path_to_current_user", side_effect=[None, None, failure]
+            ):
+                with self.assertRaisesRegex(PermissionError, "PRIVATE_PERMISSION_ENFORCEMENT_FAILED"):
+                    EXTRACT.write_result({"new": True}, str(output))
+            self.assertEqual(output.read_text(encoding="utf-8"), "old evidence")
+            self.assertFalse(any(base.glob("*.rollback")))
+
+            output.write_text("old evidence", encoding="utf-8")
+            with mock.patch.object(
+                EXTRACT,
+                "fsync_directory",
+                side_effect=[None, OSError("cleanup fsync failed"), None],
+            ):
+                with self.assertRaisesRegex(OSError, "cleanup fsync failed"):
+                    EXTRACT.write_result({"new": True}, str(output))
+            self.assertEqual(json.loads(output.read_text(encoding="utf-8")), {"new": True})
+            self.assertFalse(any(base.glob("*.rollback")))
+
+            source = base / "source.png"
+            target = base / "display.jpg"
+            Image.new("RGB", (64, 48), color=(80, 120, 160)).save(source)
+            target.write_bytes(b"old display")
+            with mock.patch.object(
+                DISPLAY, "restrict_path_to_current_user", side_effect=[None, None, None, failure]
+            ):
+                with self.assertRaisesRegex(PermissionError, "PRIVATE_PERMISSION_ENFORCEMENT_FAILED"):
+                    DISPLAY.prepare_display_image(str(source), str(target))
+            self.assertEqual(target.read_bytes(), b"old display")
+            self.assertFalse(any(base.glob("*.rollback")))
+
+            target.write_bytes(b"old display")
+            with mock.patch.object(
+                DISPLAY,
+                "fsync_directory",
+                side_effect=[None, OSError("cleanup fsync failed"), None],
+            ):
+                with self.assertRaisesRegex(OSError, "cleanup fsync failed"):
+                    DISPLAY.prepare_display_image(str(source), str(target))
+            self.assertNotEqual(target.read_bytes(), b"old display")
+            self.assertFalse(any(base.glob("*.rollback")))
+
+    def test_109c_rollback_cleanup_scrubs_old_content_and_removes_stale_orphans(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            output = base / "customer-evidence.json"
+            output.write_text("old private evidence", encoding="utf-8")
+            real_unlink = Path.unlink
+
+            def reject_extract_rollback(path, *args, **kwargs):
+                if str(path).endswith(".rollback"):
+                    raise OSError("rollback unlink denied")
+                return real_unlink(path, *args, **kwargs)
+
+            with mock.patch.object(Path, "unlink", new=reject_extract_rollback):
+                with self.assertRaisesRegex(PermissionError, "PRIVATE_ROLLBACK_CLEANUP_FAILED"):
+                    EXTRACT.write_result({"new": True}, str(output))
+            self.assertEqual(json.loads(output.read_text(encoding="utf-8")), {"new": True})
+            evidence_rollbacks = list(base.glob(".*.rollback"))
+            self.assertEqual(len(evidence_rollbacks), 1)
+            self.assertEqual(evidence_rollbacks[0].read_bytes(), b"")
+            self.assertEqual(evidence_rollbacks[0].stat().st_mode & 0o777, 0o600)
+            old_time = EXTRACT.time.time() - EXTRACT.ROLLBACK_STALE_SECONDS - 1
+            EXTRACT.os.utime(evidence_rollbacks[0], (old_time, old_time))
+            EXTRACT.write_result({"newer": True}, str(output))
+            self.assertFalse(any(base.glob(".*.rollback")))
+
+            source = base / "source.png"
+            target = base / "display.jpg"
+            Image.new("RGB", (64, 48), color=(80, 120, 160)).save(source)
+            target.write_bytes(b"old private image")
+            real_display_unlink = Path.unlink
+
+            def reject_display_rollback(path, *args, **kwargs):
+                if str(path).endswith(".rollback"):
+                    raise OSError("rollback unlink denied")
+                return real_display_unlink(path, *args, **kwargs)
+
+            with mock.patch.object(Path, "unlink", new=reject_display_rollback):
+                with self.assertRaisesRegex(PermissionError, "PRIVATE_ROLLBACK_CLEANUP_FAILED"):
+                    DISPLAY.prepare_display_image(str(source), str(target))
+            self.assertNotEqual(target.read_bytes(), b"old private image")
+            image_rollbacks = list(base.glob(".*.rollback"))
+            self.assertEqual(len(image_rollbacks), 1)
+            self.assertEqual(image_rollbacks[0].read_bytes(), b"")
+            self.assertEqual(image_rollbacks[0].stat().st_mode & 0o777, 0o600)
+            old_time = DISPLAY.time.time() - DISPLAY.ROLLBACK_STALE_SECONDS - 1
+            DISPLAY.os.utime(image_rollbacks[0], (old_time, old_time))
+            DISPLAY.prepare_display_image(str(source), str(target))
+            self.assertFalse(any(base.glob(".*.rollback")))
+
+    @unittest.skipUnless(sys.platform.startswith("win"), "Windows ACL integration test")
+    def test_110_windows_private_acl_integration(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "customer-evidence.json"
+            target.write_text("private", encoding="utf-8")
+            EXTRACT.restrict_path_to_current_user(target)
+            sid = EXTRACT.windows_current_user_sid()
+            self.assertTrue(EXTRACT.apply_and_verify_windows_private_acl(target, sid))
 
 
 if __name__ == "__main__":

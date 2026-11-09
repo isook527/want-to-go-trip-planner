@@ -1,215 +1,145 @@
 {
-  "version": "2.4.3",
-  "contractVersion": "2.3.0",
+  "version": "3.0.0",
+  "contractVersion": "2.4.0",
   "sourcePolicyVersion": "2.3.0",
-  "passportTemplateMarker": "kornvia-passport-2.4.3",
-  "installDoctorMarker": "kornvia-install-doctor-2.4.3",
+  "passportTemplateMarker": "kornvia-passport-3.0.0",
+  "installDoctorMarker": "kornvia-install-doctor-3.0.0",
+  "runtimeDependencies": {
+    "opencli": {
+      "expectedVersion": "1.8.6",
+      "entrypointSha256": "e2c5402693ccb71a04a7793d40ebf3238578d32c8b620edbb38554e0a3d2df07",
+      "packagePayloadSha256": "e21d59ccb0b2e2db1a1e618b927cd3f93b359c2833ecafffb5c118fe81a4e76c",
+      "dependencyGraphSha256": "a2e72b54397ffd6c6723d65eaab5601d30ac47120fe201c5d2ca5c0da3e18523"
+    }
+  },
   "brand": {
     "productNameZh": "Kornvia 想去就出发",
     "productNameEn": "Kornvia Want to Go",
     "platformNameZh": "想去就出发｜旅行收藏与路线规划",
-    "platformNameEn": "Want to Go | Travel Save Organizer",
+    "platformNameEn": "Want to Go | Travel Save & Route Planner",
     "subtitleZh": "把收藏的地方，变成真正走得通的旅程",
     "subtitleEn": "Turn saved places into a trip you can actually take",
     "sunnyYellow": "#F2B51D"
   },
-  "form": {
-    "method": "POST",
-    "requestUrl": "https://trip-api.kornvia.com/trip-requests",
-    "fallbackUrl": "https://trip-api.kornvia.com/trip-requests",
-    "legacyUrl": "https://kornvia.com/trip-requests",
-    "legacyStatus": 404,
-    "publicOfferId": "manual-itinerary-beta",
-    "intentOnly": true,
-    "chargeOnSubmit": false,
-    "privacy": {
-      "purposeZh": "这些信息只用于确认行程范围、档期、交付时间和后续联系。",
-      "purposeEn": "These details are used only to confirm scope, availability, delivery timing and follow-up contact.",
-      "handlingZh": "仅提交目的地、日期、天数、联系方式及必要偏好；由人工查看并跟进，不在此页面收款。",
-      "handlingEn": "Only destination, dates, trip length, contact details and necessary preferences are submitted for manual follow-up; payment is not collected on this page.",
-      "boundaryZh": "本服务不代订、不持续监控；出发前复核仅在双方约定的复核日检查一次并列出发现的变化。",
-      "boundaryEn": "The service does not book or monitor continuously. The pre-trip review is performed once on the agreed review date and lists any changes found."
-    },
-    "copy": {
-      "sectionKickerZh": "两种整理方式",
-      "sectionKickerEn": "TWO WAYS TO PLAN",
-      "sectionTitleZh": "想去库整理好后，也可以交给人工继续排。",
-      "sectionTitleEn": "Once your want-to-go library is ready, you can ask us to plan each day.",
-      "recommendedLabelZh": "推荐",
-      "recommendedLabelEn": "RECOMMENDED",
-      "requestTitleZh": "提交行程需求",
-      "requestTitleEn": "Send an itinerary request",
-      "destinationLabelZh": "目的地",
-      "destinationLabelEn": "Destination",
-      "startDateLabelZh": "出发日期",
-      "startDateLabelEn": "Start date",
-      "daysLabelZh": "旅行天数",
-      "daysLabelEn": "Trip length",
-      "selectLabelZh": "请选择",
-      "selectLabelEn": "Select",
-      "contactLabelZh": "联系方式",
-      "contactLabelEn": "Contact",
-      "contactPlaceholderZh": "微信号 / 手机号 / 邮箱",
-      "contactPlaceholderEn": "WeChat / phone / email",
-      "notesLabelZh": "同行与偏好",
-      "notesLabelEn": "Travel party and preferences",
-      "notesPlaceholderZh": "人数、步行上限、必去地点、饮食禁忌或住宿区域。",
-      "notesPlaceholderEn": "Party size, walking limit, must-go places, diet or hotel area.",
-      "submitZh": "提交行程需求，不会立即扣款",
-      "submitEn": "Send itinerary request — no charge now",
-      "purposeLabelZh": "信息用途：",
-      "purposeLabelEn": "Purpose: ",
-      "handlingLabelZh": "处理方式：",
-      "handlingLabelEn": "Handling: ",
-      "boundaryLabelZh": "服务边界：",
-      "boundaryLabelEn": "Service boundary: ",
-      "fallbackPrefixZh": "如果提交后没有看到需求编号，",
-      "fallbackPrefixEn": "If no receipt opens, ",
-      "fallbackLinkZh": "打开备用需求页",
-      "fallbackLinkEn": "use the backup request page"
-    }
-  },
-  "paymentWorkflow": {
-    "automaticCharge": false,
-    "publicStaticPaymentCode": false,
-    "stages": [
-      "submitted",
-      "scope_schedule_confirmed",
-      "customer_confirmed",
-      "payment_instructions_sent",
-      "payment_recorded",
-      "in_delivery",
-      "completed"
-    ],
-    "copyZh": "提交意愿 → 确认范围、档期和交付时间 → 顾客确认 → 单独发送付款方式 → 人工登记付款 → 开始交付",
-    "copyEn": "Submit interest → confirm scope, availability and delivery time → customer confirms → payment instructions are sent separately → payment is recorded manually → delivery begins"
-  },
   "platformImports": {
     "xiaohongshu": {
-      "domains": ["xiaohongshu.com", "xhslink.com", "xhslink.cn"],
+      "domains": [
+        "xiaohongshu.com",
+        "xhslink.com",
+        "xhslink.cn"
+      ],
       "mode": "signed_note_url",
       "requires": "xiaohongshu.com 笔记完整链接及 xsec_token；短链仅保留，需补完整链接或截图",
       "requiresEn": "A full xiaohongshu.com note URL with xsec_token. Short links are retained but require a full URL or screenshot.",
-      "canSupport": ["note_text_observed", "engagement_counts_observed", "platform_media_downloaded"]
+      "canSupport": [
+        "note_text_observed",
+        "engagement_counts_observed",
+        "platform_media_downloaded"
+      ]
     },
     "ctrip": {
-      "domains": ["ctrip.com"],
+      "domains": [
+        "ctrip.com"
+      ],
       "mode": "name_search_with_url_preservation",
       "requires": "链接来源同时提供地点名；用目的地与链接内地点 ID 消歧",
       "requiresEn": "Provide the place name with the URL. Destination and the place ID in the submitted URL are used for disambiguation.",
-      "canSupport": ["provider_place_id_observed", "place_name_observed", "city_country_observed", "coordinates_observed"]
+      "canSupport": [
+        "provider_place_id_observed",
+        "place_name_observed",
+        "city_country_observed",
+        "coordinates_observed"
+      ]
     },
     "wechat_official": {
-      "domains": ["mp.weixin.qq.com", "weixin.sogou.com"],
+      "domains": [
+        "mp.weixin.qq.com",
+        "weixin.sogou.com"
+      ],
       "mode": "public_article_browser_read",
       "requires": "可公开打开的公众号文章 URL",
       "requiresEn": "A publicly accessible WeChat Official Account article URL.",
-      "canSupport": ["article_title_observed", "article_body_observed", "article_image_urls_observed"]
+      "canSupport": [
+        "article_title_observed",
+        "article_body_observed",
+        "article_image_urls_observed"
+      ]
     },
     "mafengwo": {
-      "domains": ["mafengwo.cn"],
+      "domains": [
+        "mafengwo.cn"
+      ],
       "mode": "local_evidence_on_security_check",
       "requires": "保留原链接；安全检测时补截图、保存网页或粘贴文字",
       "requiresEn": "The original URL is retained. Provide screenshots, a saved page or pasted text when a security check blocks reading.",
-      "canSupport": ["original_url_submitted", "local_evidence_imported"]
+      "canSupport": [
+        "original_url_submitted",
+        "local_evidence_imported"
+      ]
     },
     "douyin": {
-      "domains": ["douyin.com", "iesdouyin.com"],
+      "domains": [
+        "douyin.com",
+        "iesdouyin.com"
+      ],
       "mode": "public_share_page_with_local_fallback",
       "requires": "公开作品链接或分享短链；读取受限时补原视频、截图或文字",
       "requiresEn": "A public video URL or share short link. If public reading is limited, provide the original video, screenshots or text.",
-      "canSupport": ["original_url_submitted", "public_page_metadata_observed", "local_evidence_imported"]
+      "canSupport": [
+        "original_url_submitted",
+        "public_page_metadata_observed",
+        "local_evidence_imported"
+      ]
     },
     "tiktok": {
-      "domains": ["tiktok.com"],
+      "domains": [
+        "tiktok.com"
+      ],
       "mode": "official_public_oembed",
       "requires": "公开 TikTok 视频链接；私密、删除或区域受限内容需补原视频、截图或文字",
       "requiresEn": "A public TikTok video URL. Private, removed or region-restricted content requires the original video, screenshots or text.",
-      "canSupport": ["original_url_submitted", "oembed_title_observed", "oembed_author_observed", "oembed_thumbnail_url_observed"]
+      "canSupport": [
+        "original_url_submitted",
+        "oembed_title_observed",
+        "oembed_author_observed",
+        "oembed_thumbnail_url_observed"
+      ]
     },
     "instagram": {
-      "domains": ["instagram.com"],
+      "domains": [
+        "instagram.com"
+      ],
       "mode": "official_tokenless_oembed_with_local_fallback",
       "requires": "公开 Instagram 帖子或 Reel 链接；不支持 Story，嵌入元数据不完整时补截图、原视频或文字",
       "requiresEn": "A public Instagram post or Reel URL. Stories are unsupported; provide screenshots, the original video or text when embed metadata is incomplete.",
-      "canSupport": ["original_url_submitted", "public_embed_confirmed", "local_evidence_imported"]
+      "canSupport": [
+        "original_url_submitted",
+        "public_embed_confirmed",
+        "local_evidence_imported"
+      ]
     },
     "youtube": {
-      "domains": ["youtube.com", "youtu.be"],
+      "domains": [
+        "youtube.com",
+        "youtu.be"
+      ],
       "mode": "public_oembed_metadata",
       "requires": "公开 YouTube 视频或 Shorts 链接；字幕、完整视频画面与多地点内容需补文字、原视频或带时间戳截图",
       "requiresEn": "A public YouTube video or Shorts URL. Captions, full video scenes and multi-place content require text, the original video or timestamped screenshots.",
-      "canSupport": ["original_url_submitted", "oembed_title_observed", "oembed_author_observed", "oembed_thumbnail_url_observed"]
-    }
-  },
-  "offers": {
-    "free": {
-      "id": "free-library",
-      "nameZh": "想去库与护照",
-      "nameEn": "Want-to-go library and passport",
-      "price": "免费使用",
-      "priceEn": "Free",
-      "publicSalesEntry": true,
-      "recommended": false,
-      "featuresZh": [
-        "截图、链接、视频和文字收纳",
-        "按目的地分库与地点卡",
-        "地点配图与想去护照",
-        "基础片区分组、修改与本地导出"
-      ],
-      "featuresEn": [
-        "Capture screenshots, links, videos and text",
-        "Destination libraries and place cards",
-        "Place images and Want-to-go passport",
-        "Basic area grouping, edits and local export"
-      ]
-    },
-    "preTripReview": {
-      "id": "pre-trip-review",
-      "nameZh": "出发前复核",
-      "nameEn": "Pre-trip review",
-      "publicSalesEntry": false,
-      "includedInOfferId": "manual-itinerary-beta",
-      "reviewMode": "agreed_date_once",
-      "descriptionZh": "保留为非公开的独立复核能力；客户交付中不设价格卡、购买入口或直接购买表达。¥199 人工服务包含一次双方约定日期的出发前复核。",
-      "descriptionEn": "Retained as a non-public standalone review capability without a customer-facing price card or purchase entry. The ¥199 manual service includes one review on an agreed date."
-    },
-    "manualItineraryBeta": {
-      "id": "manual-itinerary-beta",
-      "nameZh": "人工逐日行程内测",
-      "nameEn": "Manual day-by-day itinerary beta",
-      "price": "¥199",
-      "publicSalesEntry": true,
-      "recommended": true,
-      "availabilityZh": "内测期限量接单，提交后确认档期",
-      "availabilityEn": "Limited beta availability; timing is confirmed after submission",
-      "descriptionZh": "一个城市、3–7 天、2–15 个地点，含一次范围内修改和一次双方约定日期的出发前复核。",
-      "descriptionEn": "One city, 3–7 days and 2–15 places, with one in-scope revision and one pre-trip review on an agreed date.",
-      "limits": {
-        "cities": 1,
-        "daysMin": 3,
-        "daysMax": 7,
-        "placesMin": 2,
-        "placesMax": 15,
-        "revisions": 1,
-        "preTripReviews": 1
-      },
-      "exclusionsZh": [
-        "不代订",
-        "不持续监控"
-      ],
-      "exclusionsEn": [
-        "No booking on the customer's behalf",
-        "No continuous monitoring"
+      "canSupport": [
+        "original_url_submitted",
+        "oembed_title_observed",
+        "oembed_author_observed",
+        "oembed_thumbnail_url_observed"
       ]
     }
   },
   "copy": {
-    "onboardingZh": "Kornvia 想去就出发已准备好。把本轮旅行截图、公开链接、视频或文字发给我，我会先收进按目的地整理的想去库，不会擅自生成攻略。小红书完整笔记链接、携程地点链接和公开公众号文章会按平台规则读取；马蜂窝遇安全检测时会保留原链接，并请你补截图、保存网页或文字。抖音会读取本轮公开作品页；TikTok 和 YouTube 读取公开视频的公开嵌入元数据；Instagram 支持公开帖子与 Reel，Story 不支持。这四个平台读取受限或资料不足时都会保留原链接，并请你补原视频、截图或文字。多地点文章不会冒充一个地点，需要指定地点名或拆分收纳。需要整理时，说“生成曼谷想去护照”。免费档包含收纳、分库、地点卡与配图、护照、基础片区分组、修改和本地导出。¥199 人工逐日行程内测覆盖一个城市、3–7 天、2–15 个地点，含一次范围内修改和一次双方约定日期的出发前复核；不代订、不持续监控。内测期限量接单，提交后确认档期。",
-    "onboardingEn": "Kornvia Want to Go is ready. Send travel screenshots, public links, videos or text from this turn and I will save them by destination in your want-to-go library without creating a guide unless asked. Full Xiaohongshu note URLs, Ctrip place URLs and public WeChat Official Account articles use verified platform adapters. If Mafengwo presents a security check, the submitted URL is retained and a screenshot, saved page or pasted text is requested. Douyin reads only public video-page metadata available in the current run. TikTok and YouTube use public embed metadata for public videos. Instagram supports public posts and Reels; Stories are unsupported. If any of these four platforms is blocked or returns incomplete evidence, the original URL is retained and the original video, screenshots or text is requested. Multi-place articles are not presented as one place; name the target place or split the source. The free tier includes capture, destination libraries, place cards and images, passport, basic area grouping, edits and local export. The ¥199 manual itinerary beta covers one city, 3–7 days and 2–15 places with one in-scope revision and one pre-trip review on an agreed date. It does not include booking or continuous monitoring. Beta availability is limited and confirmed after submission.",
-    "savedNextStepZh": "想把收藏整理成网页攻略，可以说“生成{destination}想去护照”。",
-    "savedNextStepEn": "Say “Create my {destination} Want-to-go passport” when you want a shareable web guide.",
-    "passportReadyZh": "想去护照已生成。免费档可继续修改、排序、撤销和本地导出。需要人工逐日安排时，¥199 内测覆盖一个城市、3–7 天、2–15 个地点，含一次范围内修改和一次双方约定日期的出发前复核；不代订、不持续监控。内测期限量接单，提交后确认档期。",
-    "passportReadyEn": "Your Want-to-go passport is ready. The free tier remains editable, sortable, undoable and locally exportable. The ¥199 manual itinerary beta covers one city, 3–7 days and 2–15 places with one in-scope revision and one pre-trip review on an agreed date; booking and continuous monitoring are excluded. Beta availability is limited and confirmed after submission."
+    "onboardingZh": "想去就出发已就绪。发来旅行截图、公开链接、原视频或文字，就能按目的地整理收藏。需要时可生成带逐日路线的护照，也可在约定日期核对变化。",
+    "onboardingEn": "Want to Go is ready. Send travel screenshots, public links, original videos, or notes to organize your saves. Ask for a day-by-day passport or a check on your agreed date.",
+    "savedNextStepZh": "想生成完整护照，可以说“生成{destination}想去护照”；我会先补问行程条件，再生成地点卡、按天路线和路线图。",
+    "savedNextStepEn": "Say “Create my {destination} Want-to-go passport” when you are ready. I will ask for trip constraints before creating place cards, a day-by-day route and a route map.",
+    "passportReadyZh": "想去护照已生成。可以调整逐日路线、撤销修改，或在约定日期复核营业、预约和交通信息。",
+    "passportReadyEn": "Your Want-to-go passport is ready. You can revise the itinerary, undo an edit, or recheck opening hours, reservations, and transport on an agreed date."
   }
 }

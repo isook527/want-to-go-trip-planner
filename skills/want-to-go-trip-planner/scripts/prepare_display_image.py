@@ -9,14 +9,172 @@ not become a place card's main image.
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import math
+import os
+import re
+import shutil
+import stat
+import subprocess
 import sys
+import tempfile
+import time
 from pathlib import Path
 
 
 DEFAULT_ASPECT = 4 / 3
 DEFAULT_MIN_PHOTO_SCORE = 0.45
+ROLLBACK_STALE_SECONDS = 60 * 60
+ROLLBACK_REMOVE_ATTEMPTS = 3
+
+
+def windows_current_user_sid() -> str:
+    result = subprocess.run(
+        ["whoami", "/user", "/fo", "csv", "/nh"],
+        capture_output=True, text=True, timeout=15, check=False,
+    )
+    if result.returncode != 0:
+        raise PermissionError("PRIVATE_PERMISSION_ENFORCEMENT_FAILED")
+    try:
+        row = next(csv.reader([result.stdout.strip()]))
+    except (csv.Error, StopIteration) as error:
+        raise PermissionError("PRIVATE_PERMISSION_ENFORCEMENT_FAILED") from error
+    sid = (row[-1] if row else "").strip()
+    if not re.fullmatch(r"S-1-(?:\d+-){1,14}\d+", sid, re.IGNORECASE):
+        raise PermissionError("PRIVATE_PERMISSION_ENFORCEMENT_FAILED")
+    return sid
+
+
+def apply_and_verify_windows_private_acl(path: Path, sid: str, directory: bool = False) -> bool:
+    powershell = shutil.which("powershell.exe") or shutil.which("powershell") or shutil.which("pwsh")
+    if not powershell:
+        return False
+    script = r"""
+param([string]$Target, [string]$ExpectedSid, [string]$DirectoryFlag)
+$ErrorActionPreference = 'Stop'
+$acl = Get-Acl -LiteralPath $Target
+$acl.SetAccessRuleProtection($true, $false)
+foreach ($existing in @($acl.Access)) { [void]$acl.RemoveAccessRuleSpecific($existing) }
+$identity = [System.Security.Principal.SecurityIdentifier]::new($ExpectedSid)
+if ($DirectoryFlag -eq 'true') {
+  $inheritance = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+  $propagation = [System.Security.AccessControl.PropagationFlags]::None
+  $newRule = [System.Security.AccessControl.FileSystemAccessRule]::new($identity, 'FullControl', $inheritance, $propagation, 'Allow')
+} else {
+  $newRule = [System.Security.AccessControl.FileSystemAccessRule]::new($identity, 'FullControl', 'Allow')
+}
+[void]$acl.AddAccessRule($newRule)
+Set-Acl -LiteralPath $Target -AclObject $acl
+$acl = Get-Acl -LiteralPath $Target
+$rules = @($acl.Access)
+if (-not $acl.AreAccessRulesProtected -or $rules.Count -ne 1) { exit 41 }
+$rule = $rules[0]
+$ruleSid = $rule.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value
+$full = [System.Security.AccessControl.FileSystemRights]::FullControl
+$hasFull = (([int]$rule.FileSystemRights -band [int]$full) -eq [int]$full)
+if ($ruleSid -ne $ExpectedSid -or $rule.AccessControlType -ne 'Allow' -or -not $hasFull) { exit 42 }
+"""
+    result = subprocess.run(
+        [
+            powershell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+            "-Command", f"& {{ {script} }}", str(path), sid, str(bool(directory)).lower(),
+        ],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        timeout=30, check=False,
+    )
+    return result.returncode == 0
+
+
+def restrict_path_to_current_user(path: Path, directory: bool = False) -> None:
+    if sys.platform.startswith("win"):
+        sid = windows_current_user_sid()
+        grant = f"*{sid}:(OI)(CI)F" if directory else f"*{sid}:F"
+        try:
+            result = subprocess.run(
+                ["icacls", str(path), "/inheritance:r", "/grant:r", grant],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                timeout=30, check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            raise PermissionError("PRIVATE_PERMISSION_ENFORCEMENT_FAILED") from error
+        if result.returncode != 0 or not apply_and_verify_windows_private_acl(path, sid, directory):
+            raise PermissionError("PRIVATE_PERMISSION_ENFORCEMENT_FAILED")
+        return
+    expected = 0o700 if directory else 0o600
+    try:
+        path.chmod(expected)
+        actual = stat.S_IMODE(path.stat().st_mode)
+    except OSError as error:
+        raise PermissionError("PRIVATE_PERMISSION_ENFORCEMENT_FAILED") from error
+    if actual != expected:
+        raise PermissionError("PRIVATE_PERMISSION_ENFORCEMENT_FAILED")
+
+
+def fsync_directory(path: Path) -> None:
+    try:
+        descriptor = os.open(str(path), os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(descriptor)
+    except OSError:
+        pass
+    finally:
+        os.close(descriptor)
+
+
+def secure_remove_rollback(path: Path) -> None:
+    """Remove a rollback image; scrub its contents before failing closed."""
+    if not path.exists() and not path.is_symlink():
+        return
+    if path.is_symlink():
+        try:
+            path.unlink()
+            return
+        except OSError as error:
+            raise PermissionError("PRIVATE_ROLLBACK_CLEANUP_FAILED") from error
+    restrict_path_to_current_user(path)
+    last_error = None
+    for _ in range(ROLLBACK_REMOVE_ATTEMPTS):
+        try:
+            path.unlink()
+            return
+        except OSError as error:
+            last_error = error
+    try:
+        with path.open("r+b", buffering=0) as handle:
+            handle.truncate(0)
+            os.fsync(handle.fileno())
+        restrict_path_to_current_user(path)
+    except OSError as error:
+        raise PermissionError("PRIVATE_ROLLBACK_CLEANUP_FAILED") from error
+    for _ in range(ROLLBACK_REMOVE_ATTEMPTS):
+        try:
+            path.unlink()
+            return
+        except OSError as error:
+            last_error = error
+    raise PermissionError("PRIVATE_ROLLBACK_CLEANUP_FAILED") from last_error
+
+
+def cleanup_stale_rollbacks(parent: Path, target_name: str) -> None:
+    """Clean private, target-specific rollback files old enough not to be active."""
+    prefix = f".{target_name}."
+    now = time.time()
+    for candidate in parent.iterdir():
+        if not candidate.name.startswith(prefix) or not candidate.name.endswith(".rollback"):
+            continue
+        if candidate.is_symlink():
+            secure_remove_rollback(candidate)
+            continue
+        restrict_path_to_current_user(candidate)
+        try:
+            age = now - candidate.stat().st_mtime
+        except OSError as error:
+            raise PermissionError("PRIVATE_ROLLBACK_CLEANUP_FAILED") from error
+        if age >= ROLLBACK_STALE_SECONDS:
+            secure_remove_rollback(candidate)
 
 
 def cli_locale() -> str:
@@ -164,8 +322,46 @@ def prepare_display_image(
     box, score = best_crop(source, aspect)
     cropped = source.crop(box)
     target = Path(output_path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    cropped.save(target, "JPEG", quality=90, optimize=True)
+    target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    restrict_path_to_current_user(target.parent, directory=True)
+    cleanup_stale_rollbacks(target.parent, target.name)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{target.name}.", suffix=".tmp", dir=str(target.parent)
+    )
+    os.close(descriptor)
+    temporary = Path(temporary_name)
+    replaced = False
+    backup = target.parent / f".{target.name}.{os.urandom(12).hex()}.rollback"
+    backup_moved = False
+    committed = False
+    try:
+        cropped.save(temporary, "JPEG", quality=90, optimize=True)
+        with temporary.open("rb") as handle:
+            os.fsync(handle.fileno())
+        restrict_path_to_current_user(temporary)
+        if target.exists():
+            os.replace(target, backup)
+            backup_moved = True
+            restrict_path_to_current_user(backup)
+        os.replace(temporary, target)
+        replaced = True
+        restrict_path_to_current_user(target)
+        fsync_directory(target.parent)
+        committed = True
+        if backup_moved and backup.exists():
+            secure_remove_rollback(backup)
+            backup_moved = False
+        fsync_directory(target.parent)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        if not committed:
+            if replaced:
+                target.unlink(missing_ok=True)
+            if backup_moved and backup.exists():
+                os.replace(backup, target)
+                backup_moved = False
+        fsync_directory(target.parent)
+        raise
     photo_rich = score >= min_photo_score
     return {
         "output": str(target),

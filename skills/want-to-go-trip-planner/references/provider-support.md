@@ -7,7 +7,7 @@
 - Windows 完整 OCR 需要 Tesseract、`eng` 和 `chi_sim`/`chi_tra` 至少一个。
 - macOS 优先 Vision OCR，可降级到 Tesseract。
 - FFmpeg/FFprobe 只影响视频自动拆帧；缺失时收关键截图。
-- `opencli` 是小红书、携程和公众号自动读取的本地适配依赖；本版已验证 1.8.6。缺失时 doctor 必须标记这些平台能力受限，原 URL 仍照常保留。
+- `opencli` 是小红书、携程和公众号自动读取的本地适配依赖；本版只接受配置中锁定版本、入口文件 SHA-256、包内正式文件 SHA-256、包含实际已安装 peer 依赖的完整可解析依赖图 SHA-256 同时匹配，且没有 `~/.opencli/clis` 或 `~/.opencli/plugins` 本地覆盖的 1.8.6。任何直接、传递或运行时可选 peer 依赖被加入、替换、缺失、完整性不匹配，或存在覆盖时，doctor 必须标记这些平台能力受限，原 URL 仍照常保留。
 - `opencli` 可能复用本机已有浏览器的只读会话状态；Skill 不代用户登录、不导出或上传 Cookie，遇验证码、登录或安全检查立即停止并保留原始链接。不要从不明来源安装或替换该二进制。
 - PowerShell 5.1 脚本源保持 ASCII-safe，运行时从 UTF-8 配置读取版本；会话设置 `PYTHONUTF8=1` 与 `PYTHONIOENCODING=utf-8`。
 
@@ -40,6 +40,9 @@
 - 链接：只读取公开 HTTP(S) 标准端口，防 SSRF；阻挡时不绕过。
 - 小红书：支持含 `xsec_token` 的完整笔记链接读取正文，并在 durable 模式下载逐张媒体；短链只保留，需补完整链接或截图。下载文件按文件头识别真实 MIME，不能相信 `.jpg` 扩展名。
 - 完整提交 URL 只保存在内部来源账本；生成客户 HTML 时移除 `xsec_token` 等凭证式查询参数，不删除普通内容定位参数。
+- 小红书签名 URL 通过标准输入交给本地适配器引导进程，不放进进程命令行参数；适配器入口版本和 SHA-256 不匹配时拒绝运行。
+- 对客 HTML 只把公开 HTTPS URL 渲染为可点击链接；明文 HTTP、嵌入账号密码、非标准端口和 `.local/.lan/.internal/.home` 等本地主机名继续留在内部来源账本，不进入客户链接。
+- durable 资产目录必须使用仅当前用户可访问的权限：POSIX 目录 `0700`、文件 `0600`；Windows 移除继承、只授权当前用户并复查最终 ACL。替换已有文件时，同目录回滚副本先收紧为私有权限；清理会有限重试，仍无法删除时先清空旧内容，后续写入再清理过期的目标专属孤儿回滚文件。权限设置或复查失败时阻止持久化，不能静默降级。平台下载目录由本轮在输出资产目录内新建，忽略清单传入的外部目录。
 - 携程：详情页直接读取会被 432 阻挡；支持用顾客同时提供的地点名搜索，再用目的地与原链接内地点 ID 消歧，保存名称、城市、国家、坐标和 provider ID。只有链接、没有地点名或截图时必须返回待补充，不能猜。
 - 微信公众号：支持公开的 `mp.weixin.qq.com` 与搜狗微信文章 URL，经浏览器读取标题、正文与图片 URL；触发安全检测时保留原链接并请求保存页或截图。
 - 马蜂窝：当前公开文章实测触发安全检测。禁止宣称已读正文或绕过验证；保留顾客 URL，并通过截图、浏览器保存的 HTML 或粘贴文字完成收纳。
@@ -70,7 +73,8 @@
 ## English provider and system boundary
 
 - macOS and Windows are supported targets. Run doctor first. Core dependencies are Python 3.9+, Pillow and Node.js 18+. Windows OCR requires Tesseract with `eng` plus `chi_sim` or `chi_tra`; macOS prefers Vision OCR. FFmpeg/FFprobe only affects automatic video frame extraction.
-- `opencli` is the local adapter for Xiaohongshu, Ctrip and public WeChat articles. It may reuse an existing read-only local browser session, but the Skill never exports cookies, logs in for the user or bypasses CAPTCHA, WAF, login walls or robots restrictions.
+- `opencli` is the local adapter for Xiaohongshu, Ctrip and public WeChat articles. Only the configured 1.8.6 version whose entrypoint SHA-256, package-payload SHA-256 and complete resolved dependency-graph SHA-256 (including installed peer dependencies) match the product configuration, with no local code in `~/.opencli/clis` or `~/.opencli/plugins`, is accepted. Any added, replaced or missing direct, transitive or runtime-optional peer dependency makes the adapter untrusted. Signed Xiaohongshu URLs are passed to the local adapter bootstrap over standard input instead of appearing in its process arguments. The adapter may reuse an existing read-only local browser session, but the Skill never exports cookies, logs in for the user or bypasses CAPTCHA, WAF, login walls or robots restrictions.
+- Durable media requires private local permissions (POSIX directories `0700`, files `0600`; Windows removes inheritance, grants only the current user and verifies the resulting ACL). Durable writes keep a private same-directory rollback until the replacement is verified; cleanup retries, scrubs undeletable rollback contents and removes stale target-specific rollback files on a later write. Durable storage stops if permission enforcement or verification fails. Each platform download gets a fresh directory under the output asset tree; caller-supplied media directories are ignored. Customer HTML links require public HTTPS and reject embedded credentials, non-standard ports and local-only host suffixes.
 - Xiaohongshu: require a full note URL with `xsec_token`; retain short links and request the full URL or screenshots. In durable mode, preserve downloaded platform media individually and detect MIME from file bytes.
 - Ctrip: require the submitted place URL plus a place name; use destination and the URL place ID for disambiguation. Never select the first ambiguous candidate.
 - WeChat Official Accounts: read only public article URLs. Retain the original URL and request a saved page or screenshots when a security check blocks access.

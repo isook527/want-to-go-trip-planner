@@ -18,10 +18,46 @@ RELEASE_MANIFEST_PATH = SKILL_ROOT / "release-manifest.json"
 ROOT_DIRECTORY = "want-to-go-trip-planner"
 MANIFEST_SCHEMA = "kornvia-skill-release-manifest-1"
 FIXED_ZIP_TIME = (2026, 1, 1, 0, 0, 0)
+MAX_ARCHIVE_ENTRY_BYTES = 32 * 1024 * 1024
+MAX_ARCHIVE_TOTAL_BYTES = 128 * 1024 * 1024
+MAX_ARCHIVE_ENTRIES = 10_000
+MAX_COMPRESSION_RATIO = 200
 
 
 def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def streamed_archive_sha256(archive: zipfile.ZipFile, info: zipfile.ZipInfo) -> str:
+    digest = hashlib.sha256()
+    size = 0
+    with archive.open(info, "r") as handle:
+        while True:
+            chunk = handle.read(1024 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > MAX_ARCHIVE_ENTRY_BYTES:
+                raise ValueError(f"release archive entry is too large: {info.filename}")
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def validate_archive_limits(archive: zipfile.ZipFile) -> None:
+    infos = archive.infolist()
+    if len(infos) > MAX_ARCHIVE_ENTRIES:
+        raise ValueError("release archive contains too many entries")
+    total = 0
+    for info in infos:
+        if info.is_dir():
+            continue
+        if info.file_size > MAX_ARCHIVE_ENTRY_BYTES:
+            raise ValueError(f"release archive entry is too large: {info.filename}")
+        total += info.file_size
+        if info.file_size > 1024 * 1024 and info.file_size / max(1, info.compress_size) > MAX_COMPRESSION_RATIO:
+            raise ValueError(f"release archive compression ratio is unsafe: {info.filename}")
+    if total > MAX_ARCHIVE_TOTAL_BYTES:
+        raise ValueError("release archive expanded content is too large")
 
 
 def package_files(include_manifest: bool = True) -> list[Path]:
@@ -127,18 +163,21 @@ def verify_archive(zip_path: Path) -> dict:
         for path in package_files()
     }
     with zipfile.ZipFile(zip_path) as archive:
+        validate_archive_limits(archive)
         archive.testzip()
         file_names = sorted(name for name in archive.namelist() if not name.endswith("/"))
         roots = {PurePosixPath(name).parts[0] for name in archive.namelist() if PurePosixPath(name).parts}
         if roots != {ROOT_DIRECTORY}:
             raise ValueError("release archive must contain one expected root directory")
         packed = {
-            name.removeprefix(f"{ROOT_DIRECTORY}/"): sha256_bytes(archive.read(name))
+            name.removeprefix(f"{ROOT_DIRECTORY}/"): streamed_archive_sha256(archive, archive.getinfo(name))
             for name in file_names
         }
         if packed != expected_source:
             raise ValueError("release archive files do not match the source directory")
-        manifest = json.loads(archive.read(f"{ROOT_DIRECTORY}/release-manifest.json"))
+        manifest_info = archive.getinfo(f"{ROOT_DIRECTORY}/release-manifest.json")
+        with archive.open(manifest_info, "r") as handle:
+            manifest = json.load(handle)
     expected_manifest = release_manifest()
     if manifest != expected_manifest:
         raise ValueError("release manifest does not match package source")

@@ -17,7 +17,7 @@
 - 同名同地址/分店：可合并来源。
 - 同名不同地址/分店：保留多个候选并要求确认。
 - 只有名称、没有地址/分店：不得自动选择同名候选。
-- route 使用起点、终点和途经点建立 identity。
+- `placeType: route` 表示顾客收藏的一条现成路线文章或 citywalk，使用起点、终点和途经点建立 identity。它不是本次护照生成的 `routePlan`。
 
 候选必须声明 `canSupport` 和 `cannotProve`。`same_name_means_same_branch` 始终属于不能证明的事项，除非地址/分店证据一致。
 
@@ -55,7 +55,9 @@
 
 `public_space`：核实名称、地址/位置、想去理由、出发提醒。无统一时间可说明场内商户各自安排。
 
-`route`：核实路线名、起终点或至少两个途经点、建议时长、路线亮点、出发提醒。
+`placeType: route`：核实收藏路线名、起终点或至少两个途经点、建议时长、路线亮点、出发提醒。
+
+`routePlan`：由本次行程问诊和该目的地全部可交付地点生成的逐日编排。每个可交付地点必须只出现一次，或明确列入 `unassigned`；必去地点必须进入某一天。示意路线图不能证明实时交通、未来营业、排队、预约或人工核查。
 
 缺项地点保留在库中并计入 `retainedClueCount`，不阻塞其他完整地点。
 
@@ -65,5 +67,6 @@
 - Compare destination, name and address/branch before merging. Same name plus different address means separate candidates; same name without branch evidence must remain unresolved.
 - A lookup is complete only when its audit contains the actual public URL. Lookup URLs stay in the audit and never become customer “original saved link” buttons.
 - Use only `unverified`, `verified`, `conflict`, `not_found` or `stale`. Every status except `unverified` requires `checkedAt` and at least one official or reliable public source.
-- Business places require confirmed name, address, opening hours, reason and departure reminder. Venues require real opening information. Public spaces may state that individual tenants keep their own hours. Routes require a start/end or at least two waypoints, duration, highlight and departure reminder.
+- Business places require confirmed name, address, opening hours, reason and departure reminder. Venues require real opening information. Public spaces may state that individual tenants keep their own hours. A saved `placeType: route` requires a start/end or at least two waypoints, duration, highlight and departure reminder; it is distinct from the generated multi-place `routePlan`.
+- A `routePlan` must assign every passport-ready place exactly once or list it explicitly as unassigned, and must include every must-go place. Its schematic map does not prove live traffic, future hours, queues, reservations or human review.
 - Keep incomplete places in the library and count them in `retainedClueCount`; do not block complete places.

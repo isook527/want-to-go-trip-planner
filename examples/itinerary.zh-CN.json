@@ -1,0 +1,36 @@
+{
+  "title": "周末旅行计划",
+  "city": "示例城市",
+  "places": [
+    {
+      "name": "示例花园",
+      "address": "待确认",
+      "hours": "待确认",
+      "note": "出发前核对分店与开放情况。"
+    },
+    {
+      "name": "示例咖啡馆",
+      "address": "示例路 10 号",
+      "hours": "待确认"
+    }
+  ],
+  "days": [
+    {
+      "title": "第一天",
+      "visits": [
+        {
+          "period": "上午",
+          "place": "示例花园",
+          "detail": "交通方式待确认。"
+        },
+        {
+          "period": "下午",
+          "place": "示例咖啡馆",
+          "detail": "预留休息时间。"
+        }
+      ]
+    }
+  ],
+  "locale": "zh-CN",
+  "map_region": "unknown"
+}

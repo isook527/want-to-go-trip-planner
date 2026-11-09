@@ -2,6 +2,7 @@
 """Extract local place evidence from public links, screenshots, or text."""
 
 import argparse
+import csv
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import html
@@ -12,9 +13,11 @@ import os
 import re
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,6 +31,8 @@ MAX_JSON_BYTES = 512 * 1024
 MAX_IMAGE_BYTES = 25 * 1024 * 1024
 MAX_VIDEO_BYTES = 250 * 1024 * 1024
 MAX_VIDEO_SCENES = 24
+ROLLBACK_STALE_SECONDS = 60 * 60
+ROLLBACK_REMOVE_ATTEMPTS = 3
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "product.json"
 with CONFIG_PATH.open("r", encoding="utf-8") as _config_handle:
     PRODUCT_CONFIG = json.load(_config_handle)
@@ -282,18 +287,213 @@ def standard_http_url(value):
     return parsed.geturl()
 
 
-def opencli_executable():
+def opencli_entrypoint(executable):
+    path = Path(executable)
+    resolved = path.resolve()
+    if resolved.suffix.casefold() in {".js", ".mjs", ".cjs"} and resolved.is_file():
+        return resolved
+    candidate = path.parent / "node_modules" / "@jackwener" / "opencli" / "dist" / "src" / "main.js"
+    return candidate.resolve() if candidate.is_file() else None
+
+
+def opencli_package_root(entrypoint):
+    if not entrypoint:
+        return None
+    candidate = Path(entrypoint).resolve().parents[2]
+    package_json = candidate / "package.json"
+    try:
+        metadata = json.loads(package_json.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return candidate if metadata.get("name") == "@jackwener/opencli" else None
+
+
+def package_payload_sha256(package_root):
+    """Hash package-owned payload files while excluding npm's platform-specific dependencies."""
+    if not package_root or not Path(package_root).is_dir():
+        return ""
+    root = Path(package_root).resolve()
+    digest = hashlib.sha256()
+    try:
+        candidates = sorted(
+            (
+                item for item in root.rglob("*")
+                if "node_modules" not in item.relative_to(root).parts
+                and (item.is_file() or item.is_symlink())
+            ),
+            key=lambda item: item.relative_to(root).as_posix(),
+        )
+        for item in candidates:
+            relative = item.relative_to(root).as_posix().encode("utf-8")
+            if item.is_symlink():
+                return ""
+            content = item.read_bytes()
+            digest.update(len(relative).to_bytes(4, "big"))
+            digest.update(relative)
+            digest.update(len(content).to_bytes(8, "big"))
+            digest.update(content)
+    except (OSError, ValueError):
+        return ""
+    return digest.hexdigest()
+
+
+def resolve_node_dependency(package_root, dependency_name):
+    current = Path(package_root).resolve()
+    while True:
+        candidate = current / "node_modules" / dependency_name
+        if (candidate / "package.json").is_file():
+            return candidate.resolve()
+        parent = current.parent
+        if parent == current:
+            return None
+        current = parent
+
+
+def node_dependency_graph_sha256(package_root):
+    """Hash every resolved runtime package and resolution edge, not only the top-level CLI."""
+    if not package_root or not (Path(package_root) / "package.json").is_file():
+        return ""
+    pending = [Path(package_root).resolve()]
+    visited = set()
+    package_rows = set()
+    edge_rows = set()
+    try:
+        while pending:
+            current = pending.pop()
+            current_key = str(current)
+            if current_key in visited:
+                continue
+            visited.add(current_key)
+            metadata = json.loads((current / "package.json").read_text(encoding="utf-8"))
+            identity = f"{metadata.get('name')}@{metadata.get('version')}"
+            payload_hash = package_payload_sha256(current)
+            if not payload_hash or identity.startswith("None@"):
+                return ""
+            package_rows.add(f"P\0{identity}\0{payload_hash}")
+            required = metadata.get("dependencies") or {}
+            optional = metadata.get("optionalDependencies") or {}
+            peers = metadata.get("peerDependencies") or {}
+            peer_metadata = metadata.get("peerDependenciesMeta") or {}
+            for dependency_name in sorted(set(required) | set(optional) | set(peers)):
+                dependency = resolve_node_dependency(current, dependency_name)
+                if not dependency:
+                    peer_is_optional = bool(
+                        dependency_name in peers
+                        and isinstance(peer_metadata.get(dependency_name), dict)
+                        and peer_metadata[dependency_name].get("optional") is True
+                    )
+                    if dependency_name in required or (
+                        dependency_name in peers and not peer_is_optional
+                    ):
+                        return ""
+                    continue
+                dependency_metadata = json.loads(
+                    (dependency / "package.json").read_text(encoding="utf-8")
+                )
+                dependency_identity = (
+                    f"{dependency_metadata.get('name')}@{dependency_metadata.get('version')}"
+                )
+                edge_rows.add(
+                    f"E\0{identity}\0{dependency_name}\0{dependency_identity}"
+                )
+                pending.append(dependency)
+        canonical = "\n".join(sorted(package_rows | edge_rows)).encode("utf-8")
+    except (OSError, ValueError, json.JSONDecodeError):
+        return ""
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def opencli_user_extensions_absent(home=None):
+    """Reject local adapter/plugin code that can shadow the pinned package."""
+    user_root = Path(home) if home else Path.home()
+    for folder_name in ("clis", "plugins"):
+        folder = user_root / ".opencli" / folder_name
+        try:
+            if folder.exists() and any(folder.iterdir()):
+                return False
+        except OSError:
+            return False
+    return True
+
+
+def opencli_probe():
     executable = shutil.which("opencli")
     if not executable:
+        return {"installed": False, "version": "", "ready": False, "trusted": False}
+    base = command_probe("opencli")
+    expected = clean_text(
+        ((PRODUCT_CONFIG.get("runtimeDependencies") or {}).get("opencli") or {}).get("expectedVersion")
+    )
+    expected_hash = clean_text(
+        ((PRODUCT_CONFIG.get("runtimeDependencies") or {}).get("opencli") or {}).get("entrypointSha256")
+    ).casefold()
+    expected_payload_hash = clean_text(
+        ((PRODUCT_CONFIG.get("runtimeDependencies") or {}).get("opencli") or {}).get("packagePayloadSha256")
+    ).casefold()
+    expected_dependency_hash = clean_text(
+        ((PRODUCT_CONFIG.get("runtimeDependencies") or {}).get("opencli") or {}).get("dependencyGraphSha256")
+    ).casefold()
+    entrypoint = opencli_entrypoint(executable)
+    digest = file_sha256(entrypoint) if entrypoint and entrypoint.is_file() else ""
+    package_root = opencli_package_root(entrypoint)
+    payload_digest = package_payload_sha256(package_root)
+    dependency_digest = node_dependency_graph_sha256(package_root)
+    extensions_absent = opencli_user_extensions_absent()
+    trusted = bool(
+        entrypoint
+        and expected
+        and clean_text(base.get("version")) == expected
+        and expected_hash
+        and digest.casefold() == expected_hash
+        and expected_payload_hash
+        and payload_digest.casefold() == expected_payload_hash
+        and expected_dependency_hash
+        and dependency_digest.casefold() == expected_dependency_hash
+        and extensions_absent
+    )
+    return {
+        "installed": bool(base.get("installed")),
+        "version": clean_text(base.get("version")),
+        "expectedVersion": expected,
+        "packageIntegrity": bool(expected_payload_hash and payload_digest.casefold() == expected_payload_hash),
+        "dependencyIntegrity": bool(
+            expected_dependency_hash and dependency_digest.casefold() == expected_dependency_hash
+        ),
+        "userExtensionsAbsent": extensions_absent,
+        "ready": bool(base.get("ready") and trusted),
+        "trusted": trusted,
+    }
+
+
+def trusted_opencli_entrypoint():
+    executable = shutil.which("opencli")
+    probe = opencli_probe()
+    entrypoint = opencli_entrypoint(executable) if executable else None
+    if not probe["ready"] or not entrypoint:
         raise ValueError(
-            "PLATFORM_ADAPTER_UNAVAILABLE: opencli is required for this platform URL"
+            "PLATFORM_ADAPTER_UNAVAILABLE: opencli 1.8.6 failed the trusted version or integrity check"
         )
-    return executable
+    return entrypoint
 
 
 def run_opencli(arguments, timeout=60, expect_json=False):
+    entrypoint = trusted_opencli_entrypoint()
+    node = shutil.which("node")
+    if not node:
+        raise ValueError("PLATFORM_ADAPTER_UNAVAILABLE: Node.js is required for opencli")
+    bootstrap = (
+        "const fs=require('node:fs');const os=require('node:os');const path=require('node:path');"
+        "const {pathToFileURL}=require('node:url');"
+        "const p=JSON.parse(fs.readFileSync(0,'utf8'));"
+        "const root=path.join(os.homedir(),'.opencli');"
+        "for(const name of ['clis','plugins']){const d=path.join(root,name);"
+        "if(fs.existsSync(d)&&fs.readdirSync(d).length){process.stderr.write('untrusted opencli extension\\n');process.exit(78);}}"
+        "process.argv=[process.execPath,p.entry,...p.arguments];"
+        "import(pathToFileURL(p.entry).href);"
+    )
     result = subprocess.run(
-        [opencli_executable(), *arguments],
+        [node, "-e", bootstrap],
+        input=json.dumps({"entry": str(entrypoint), "arguments": list(arguments)}),
         capture_output=True,
         text=True,
         timeout=timeout,
@@ -345,6 +545,103 @@ def platform_media_files(folder):
             "immutableOriginal": True,
         })
     return result
+
+
+def windows_current_user_sid():
+    result = subprocess.run(
+        ["whoami", "/user", "/fo", "csv", "/nh"],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise PermissionError("PRIVATE_PERMISSION_ENFORCEMENT_FAILED")
+    try:
+        row = next(csv.reader([result.stdout.strip()]))
+    except (csv.Error, StopIteration) as error:
+        raise PermissionError("PRIVATE_PERMISSION_ENFORCEMENT_FAILED") from error
+    sid = clean_text(row[-1] if row else "")
+    if not re.fullmatch(r"S-1-(?:\d+-){1,14}\d+", sid, re.IGNORECASE):
+        raise PermissionError("PRIVATE_PERMISSION_ENFORCEMENT_FAILED")
+    return sid
+
+
+def apply_and_verify_windows_private_acl(path, sid, directory=False):
+    powershell = shutil.which("powershell.exe") or shutil.which("powershell") or shutil.which("pwsh")
+    if not powershell:
+        return False
+    script = r"""
+param([string]$Target, [string]$ExpectedSid, [string]$DirectoryFlag)
+$ErrorActionPreference = 'Stop'
+$acl = Get-Acl -LiteralPath $Target
+$acl.SetAccessRuleProtection($true, $false)
+foreach ($existing in @($acl.Access)) { [void]$acl.RemoveAccessRuleSpecific($existing) }
+$identity = [System.Security.Principal.SecurityIdentifier]::new($ExpectedSid)
+if ($DirectoryFlag -eq 'true') {
+  $inheritance = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+  $propagation = [System.Security.AccessControl.PropagationFlags]::None
+  $newRule = [System.Security.AccessControl.FileSystemAccessRule]::new($identity, 'FullControl', $inheritance, $propagation, 'Allow')
+} else {
+  $newRule = [System.Security.AccessControl.FileSystemAccessRule]::new($identity, 'FullControl', 'Allow')
+}
+[void]$acl.AddAccessRule($newRule)
+Set-Acl -LiteralPath $Target -AclObject $acl
+$acl = Get-Acl -LiteralPath $Target
+$rules = @($acl.Access)
+if (-not $acl.AreAccessRulesProtected -or $rules.Count -ne 1) { exit 41 }
+$rule = $rules[0]
+$ruleSid = $rule.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value
+$full = [System.Security.AccessControl.FileSystemRights]::FullControl
+$hasFull = (([int]$rule.FileSystemRights -band [int]$full) -eq [int]$full)
+if ($ruleSid -ne $ExpectedSid -or $rule.AccessControlType -ne 'Allow' -or -not $hasFull) { exit 42 }
+"""
+    result = subprocess.run(
+        [
+            powershell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+            "-Command", f"& {{ {script} }}", str(path), sid, str(bool(directory)).lower(),
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=30,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def restrict_path_to_current_user(path, directory=False):
+    """Apply and verify private permissions; never silently continue on failure."""
+    target = Path(path)
+    if sys.platform.startswith("win"):
+        sid = windows_current_user_sid()
+        grant = f"*{sid}:(OI)(CI)F" if directory else f"*{sid}:F"
+        try:
+            result = subprocess.run(
+                ["icacls", str(target), "/inheritance:r", "/grant:r", grant],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=30,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            raise PermissionError("PRIVATE_PERMISSION_ENFORCEMENT_FAILED") from error
+        if result.returncode != 0 or not apply_and_verify_windows_private_acl(target, sid, directory):
+            raise PermissionError("PRIVATE_PERMISSION_ENFORCEMENT_FAILED")
+        return
+    expected = 0o700 if directory else 0o600
+    try:
+        os.chmod(target, expected)
+        actual = stat.S_IMODE(os.stat(target).st_mode)
+    except OSError as error:
+        raise PermissionError("PRIVATE_PERMISSION_ENFORCEMENT_FAILED") from error
+    if actual != expected:
+        raise PermissionError("PRIVATE_PERMISSION_ENFORCEMENT_FAILED")
+
+
+def ensure_private_directory(path):
+    Path(path).mkdir(parents=True, exist_ok=True, mode=0o700)
+    restrict_path_to_current_user(path, directory=True)
+    return str(path)
 
 
 def prepare_platform_media_assets(files):
@@ -467,12 +764,21 @@ def xiaohongshu_evidence(url, source, timeout, output_locale="zh-CN"):
     media_folder = clean_text(source.get("platformMediaDirectory"))
     media = []
     if source.get("downloadMedia") and media_folder:
-        os.makedirs(media_folder, exist_ok=True)
+        ensure_private_directory(media_folder)
+        before_download = {
+            item["path"] for item in platform_media_files(media_folder)
+        }
         run_opencli(
             ["xiaohongshu", "download", url, "--output", media_folder],
             timeout=max(timeout, 180),
         )
-        media = prepare_platform_media_assets(platform_media_files(media_folder))
+        downloaded = [
+            item for item in platform_media_files(media_folder)
+            if item["path"] not in before_download
+        ]
+        for item in downloaded:
+            restrict_path_to_current_user(item["path"])
+        media = prepare_platform_media_assets(downloaded)
     return {
         "title": title,
         "originalText": text_value,
@@ -1132,7 +1438,7 @@ def macos_vision_ocr(image_path):
     swift_executable = shutil.which("swift")
     if sys.platform != "darwin" or not swift_executable:
         return None
-    script = os.path.join(os.path.dirname(__file__), "ocr_macos.swift")
+    script = os.path.join(os.path.dirname(__file__), "evidence_ocr_macos.swift")
     environment = dict(os.environ)
     module_cache = os.path.join(tempfile.gettempdir(), "want-to-go-swift-cache")
     os.makedirs(module_cache, exist_ok=True)
@@ -1729,7 +2035,13 @@ def preserve_screenshot_asset(evidence, source, output_path, bundle_id, storage_
             f"{os.path.splitext(os.path.basename(output))[0]}-assets",
             safe_asset_token(bundle_id),
         )
-        os.makedirs(asset_root, exist_ok=True)
+        asset_base = os.path.join(
+            os.path.dirname(output),
+            f"{os.path.splitext(os.path.basename(output))[0]}-assets",
+        )
+        ensure_private_directory(asset_base)
+        ensure_private_directory(os.path.join(asset_base, safe_asset_token(bundle_id)))
+        ensure_private_directory(asset_root)
     if storage_mode == "durable" and asset_root:
         extension = os.path.splitext(original)[1].lower()
         if extension not in {".png", ".jpg", ".jpeg", ".webp"}:
@@ -1739,7 +2051,12 @@ def preserve_screenshot_asset(evidence, source, output_path, bundle_id, storage_
             f"{safe_asset_token(source.get('id') or evidence.get('sourceId'))}.{original_sha[:16]}{extension}",
         )
         if os.path.realpath(original) != os.path.realpath(target_path):
-            shutil.copy2(original, target_path)
+            try:
+                shutil.copyfile(original, target_path)
+                restrict_path_to_current_user(target_path)
+            except Exception:
+                Path(target_path).unlink(missing_ok=True)
+                raise
     evidence["localPath"] = target_path
     evidence["originalSha256"] = original_sha
     evidence["originalImmutable"] = True
@@ -1808,22 +2125,46 @@ def write_result(value, output):
     if output:
         parent = os.path.dirname(os.path.abspath(output))
         os.makedirs(parent, exist_ok=True)
+        cleanup_stale_rollbacks(parent, os.path.basename(output))
         file_descriptor, temporary = tempfile.mkstemp(
             prefix=".want-to-go-evidence-",
             dir=parent,
             text=True,
         )
+        replaced = False
+        backup = ""
+        backup_moved = False
+        committed = False
         try:
             with os.fdopen(file_descriptor, "w", encoding="utf-8") as handle:
                 handle.write(serialized)
                 handle.flush()
                 os.fsync(handle.fileno())
-            os.chmod(temporary, 0o600)
+            restrict_path_to_current_user(temporary)
+            if os.path.exists(output):
+                backup = os.path.join(parent, f".{os.path.basename(output)}.{uuid.uuid4().hex}.rollback")
+                os.replace(output, backup)
+                backup_moved = True
+                restrict_path_to_current_user(backup)
             os.replace(temporary, output)
+            replaced = True
+            restrict_path_to_current_user(output)
+            fsync_directory(parent)
+            committed = True
+            if backup_moved and os.path.exists(backup):
+                secure_remove_rollback(backup)
+                backup_moved = False
             fsync_directory(parent)
         except Exception:
             if os.path.exists(temporary):
                 os.unlink(temporary)
+            if not committed:
+                if replaced and os.path.exists(output):
+                    os.unlink(output)
+                if backup_moved and os.path.exists(backup):
+                    os.replace(backup, output)
+                    backup_moved = False
+            fsync_directory(parent)
             raise
     else:
         print(serialized, end="")
@@ -1840,6 +2181,61 @@ def fsync_directory(path):
         pass
     finally:
         os.close(descriptor)
+
+
+def secure_remove_rollback(path):
+    """Remove a rollback file; scrub its contents before failing closed."""
+    candidate = Path(path)
+    if not candidate.exists() and not candidate.is_symlink():
+        return
+    if candidate.is_symlink():
+        try:
+            candidate.unlink()
+            return
+        except OSError as error:
+            raise PermissionError("PRIVATE_ROLLBACK_CLEANUP_FAILED") from error
+    restrict_path_to_current_user(candidate)
+    last_error = None
+    for _ in range(ROLLBACK_REMOVE_ATTEMPTS):
+        try:
+            candidate.unlink()
+            return
+        except OSError as error:
+            last_error = error
+    try:
+        with candidate.open("r+b", buffering=0) as handle:
+            handle.truncate(0)
+            os.fsync(handle.fileno())
+        restrict_path_to_current_user(candidate)
+    except OSError as error:
+        raise PermissionError("PRIVATE_ROLLBACK_CLEANUP_FAILED") from error
+    for _ in range(ROLLBACK_REMOVE_ATTEMPTS):
+        try:
+            candidate.unlink()
+            return
+        except OSError as error:
+            last_error = error
+    raise PermissionError("PRIVATE_ROLLBACK_CLEANUP_FAILED") from last_error
+
+
+def cleanup_stale_rollbacks(parent, target_name):
+    """Clean private, target-specific rollback files old enough not to be active."""
+    directory = Path(parent)
+    prefix = f".{target_name}."
+    now = time.time()
+    for candidate in directory.iterdir():
+        if not candidate.name.startswith(prefix) or not candidate.name.endswith(".rollback"):
+            continue
+        if candidate.is_symlink():
+            secure_remove_rollback(candidate)
+            continue
+        restrict_path_to_current_user(candidate)
+        try:
+            age = now - candidate.stat().st_mtime
+        except OSError as error:
+            raise PermissionError("PRIVATE_ROLLBACK_CLEANUP_FAILED") from error
+        if age >= ROLLBACK_STALE_SECONDS:
+            secure_remove_rollback(candidate)
 
 
 def extract(args):
@@ -1946,17 +2342,21 @@ def batch_extract(args):
                 and storage_mode == "durable"
                 and args.output
             ):
-                source.setdefault("downloadMedia", True)
-                source.setdefault(
-                    "platformMediaDirectory",
-                    os.path.join(
-                        os.path.dirname(os.path.abspath(args.output)),
-                        f"{os.path.splitext(os.path.basename(args.output))[0]}-assets",
-                        safe_asset_token(bundle_id),
-                        safe_asset_token(source.get("id")),
-                        "platform-originals",
-                    ),
+                source["downloadMedia"] = True
+                asset_base = os.path.join(
+                    os.path.dirname(os.path.abspath(args.output)),
+                    f"{os.path.splitext(os.path.basename(args.output))[0]}-assets",
                 )
+                bundle_directory = os.path.join(asset_base, safe_asset_token(bundle_id))
+                source_directory = os.path.join(bundle_directory, safe_asset_token(source.get("id")))
+                ensure_private_directory(asset_base)
+                ensure_private_directory(bundle_directory)
+                ensure_private_directory(source_directory)
+                source["platformMediaDirectory"] = os.path.join(
+                    source_directory,
+                    f"platform-originals-{uuid.uuid4().hex[:12]}",
+                )
+                ensure_private_directory(source["platformMediaDirectory"])
             item = extract_one(current_args, source)
             evidence.append(
                 preserve_screenshot_asset(
@@ -2171,7 +2571,7 @@ def doctor_report(locale="zh-CN"):
     ocr_ready = ocr_provider != "none"
     ffmpeg = command_probe("ffmpeg", ("-version",))
     ffprobe = command_probe("ffprobe", ("-version",))
-    opencli = command_probe("opencli")
+    opencli = opencli_probe()
     video_ready = bool(ffmpeg["ready"] and ffprobe["ready"])
     core_ready = bool(platform_supported and python_ready and pillow["ready"] and node["ready"])
     full_ready = bool(core_ready and ocr_ready and opencli["ready"])

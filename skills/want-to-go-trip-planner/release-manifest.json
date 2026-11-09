@@ -1,10 +1,10 @@
 {
   "schemaVersion": "kornvia-skill-release-manifest-1",
   "packageName": "want-to-go-trip-planner",
-  "packageVersion": "2.4.3",
-  "contractVersion": "2.3.0",
+  "packageVersion": "3.0.0",
+  "contractVersion": "2.4.0",
   "rootDirectory": "want-to-go-trip-planner",
-  "fileCount": 19,
+  "fileCount": 25,
   "files": [
     {
       "path": "LICENSE",
@@ -12,64 +12,69 @@
       "sha256": "bd4de83b08ffd5e487f00efc4a9d22016190634127717f4d1b5b770c41c21be4"
     },
     {
-      "path": "README.md",
-      "size": 7856,
-      "sha256": "bf92e96572e489bf8bb7b9fcc7d2f8d0f47d3203636c76a0eda28651d035239f"
-    },
-    {
       "path": "SKILL.md",
-      "size": 31601,
-      "sha256": "30b93da729f95ba8f853f2bf8549cf9dd6da57fde88d14baa8afac57b1b96dc6"
+      "size": 3765,
+      "sha256": "f87b134361f3adbc452abfced36a06e0169a8c2c2fd769dd9a980c1f8721817d"
     },
     {
       "path": "agents/openai.yaml",
-      "size": 382,
-      "sha256": "653e4cba85b36fcae0b89bdc78a4f49813c434fa6e550803e80f0688a704f5bc"
+      "size": 254,
+      "sha256": "786b825a47da87759496c6d6f1d50339b0746e1de00dc278aa1de5e5234dafb8"
     },
     {
       "path": "config/product.json",
-      "size": 14156,
-      "sha256": "d127d877895969efb71fff382c03cc7b296061e4750c499d91caf684c9dd39ea"
+      "size": 6420,
+      "sha256": "3cff0cd782a3e29bf2b514b8127a27abd9b06ce613c18224df081ef6c04834ca"
     },
     {
-      "path": "references/customer-output.md",
-      "size": 5087,
-      "sha256": "bcf2ed0eccd72daadbe8618ad9ee30d8e58aa8f7179e1bbc8e33f0cb1a36b387"
-    },
-    {
-      "path": "references/free-library-contract.md",
-      "size": 11147,
-      "sha256": "e07b3c164dc0215006ba0ea6b3627468602c43c43dd5d4c5196d367048d0f64b"
+      "path": "references/evidence-workflow.md",
+      "size": 6039,
+      "sha256": "899178dc52681d7dcecd52bfe6bfac35c28107480abf30bcf438812310cacfa7"
     },
     {
       "path": "references/place-resolution.md",
-      "size": 3817,
-      "sha256": "a9c6cac4bb17e039426d572f05ef9d0dace6ccf9a10df2a6a0d6d22a63c880db"
+      "size": 4573,
+      "sha256": "909a5273a113186ef570717d3d7abb64f6b366ef634ff12cd642d869d13ef037"
+    },
+    {
+      "path": "references/planning-and-exports.md",
+      "size": 2595,
+      "sha256": "2e490094797897f75ae5491162dd122e370dc8fc0cb323c4ceccdefb42d65b9b"
     },
     {
       "path": "references/provider-support.md",
-      "size": 9798,
-      "sha256": "f9e66c30f5af9b749c00299178f499d5d5941d51c5202bd234ec2a7e282e4189"
+      "size": 12319,
+      "sha256": "71346873abdc182c52662fea9b498e195263052b27ea37e263607d9de87ce031"
     },
     {
       "path": "references/shared-data-contract-v2.schema.json",
-      "size": 23623,
-      "sha256": "80435575ebb3afb5ad7e3307d0ebff08d48e5a4e4885a12f680cc9804121e234"
+      "size": 34332,
+      "sha256": "b2d82c58966456055ea498c4147444b9c1ebe7e3c79322b1c5fc2439a248d63c"
+    },
+    {
+      "path": "references/workflow.en-US.md",
+      "size": 7049,
+      "sha256": "4a2c38be45081fd9f618581ba5495c5b1a2800678066c669c7481f75874d97b3"
+    },
+    {
+      "path": "references/workflow.zh-CN.md",
+      "size": 9747,
+      "sha256": "3951d90074ad954b9a17440b9e4566ac84a351accb27e27a311927d5b03e5272"
     },
     {
       "path": "renderer/kornvia-brand.mjs",
-      "size": 11115,
-      "sha256": "b15e405992efcc5b47197d0460cc586e829414ac6ba63805dfbc87c4d2c18b7a"
+      "size": 11100,
+      "sha256": "1cd28673aef0cf89745ca3bccbc3da0c548296f915487c37c51ad5ecd48a195e"
     },
     {
       "path": "renderer/render_report.mjs",
-      "size": 24807,
-      "sha256": "0b21d44290e78980c7ffe7d732fb39b5ab98d58998ac7993e44d096b30cc096d"
+      "size": 28145,
+      "sha256": "2017a9e5da1584044988ca9a1c2c3b834d9db90dabebd0caa498f9f7f4c6b5f4"
     },
     {
       "path": "scripts/build_release.py",
-      "size": 6548,
-      "sha256": "7076a6b75374c5e24f41cdb9a8840661c8fea0eedd9bc2c382c182cb930e1056"
+      "size": 8149,
+      "sha256": "7aec9f1d62eafcf3279d1e903f2f1fd076a60735644db25d8a42ab3411377fe7"
     },
     {
       "path": "scripts/doctor_windows.ps1",
@@ -77,9 +82,29 @@
       "sha256": "f8ea8ab544b912dc01843d3db0777753f67431ff458f0b3fec574ac7c4552001"
     },
     {
+      "path": "scripts/evidence_ocr_macos.swift",
+      "size": 1633,
+      "sha256": "862c2c3204589e25beef9fb5830ecd34c95029e83476042a84612262f03be456"
+    },
+    {
+      "path": "scripts/export_itinerary.py",
+      "size": 8466,
+      "sha256": "20be1696489fed30d1d6d0d3a198efaa82f24299bfc0a195d98a39cfad09afd3"
+    },
+    {
       "path": "scripts/extract_evidence.py",
-      "size": 91842,
-      "sha256": "27c342eabd60a671f29f2b20cd68097559e48009080968969399c6a52353b021"
+      "size": 108761,
+      "sha256": "6cb5ed4460e4007ce5c7b0dd05e83d14e9798455cb677f5f5de116b0fed67861"
+    },
+    {
+      "path": "scripts/library.py",
+      "size": 22170,
+      "sha256": "cd841cdf99a05676b29b462c10fcff5b1337967773e5a53211a80763c5654487"
+    },
+    {
+      "path": "scripts/ocr.py",
+      "size": 4078,
+      "sha256": "d9690a1fe8a2a514ebd8dc727fc60cf264312a6b782e8748935accd17cdb05a3"
     },
     {
       "path": "scripts/ocr_macos.swift",
@@ -88,8 +113,8 @@
     },
     {
       "path": "scripts/prepare_display_image.py",
-      "size": 8744,
-      "sha256": "784e812a69a786a4752947a03953edf8d95e33b50008b98e6e8c08f83c449a24"
+      "size": 16393,
+      "sha256": "4782d4d0fcfad742729ae3d91cfeaa2ae4002a41ff6088bd32375f1f3dbb1aa5"
     },
     {
       "path": "scripts/prepare_image_macos.swift",
@@ -97,9 +122,14 @@
       "sha256": "835de67a0b0814c7d575bc0b4889acb82b2450f56068615e547f85433dc34d6d"
     },
     {
+      "path": "scripts/render.py",
+      "size": 6635,
+      "sha256": "11028f4dadb8230b77781e8fd2b75581450b0c8d48ae20537b61594172cddde2"
+    },
+    {
       "path": "scripts/want_to_go.py",
-      "size": 159682,
-      "sha256": "55c48f0ad077f91f9d4fdeb0a9f8fccad5192ed54de4b566fcb64b701a307686"
+      "size": 174032,
+      "sha256": "45534d8dc238e78f271305bc59557ca928475de4efb56478606ea9365eb67f49"
     }
   ]
 }

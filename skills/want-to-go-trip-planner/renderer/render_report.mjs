@@ -12,23 +12,56 @@ import {
 
 const MAX_INPUT_BYTES = 12 * 1024 * 1024;
 const MAX_PHOTO_BYTES = 16 * 1024 * 1024;
-const CTA_URL = PRODUCT_CONFIG.form.requestUrl;
-const FALLBACK_URL = PRODUCT_CONFIG.form.fallbackUrl;
-const FORM_COPY = PRODUCT_CONFIG.form.copy;
-const FREE_OFFER = PRODUCT_CONFIG.offers.free;
-const MANUAL_OFFER = PRODUCT_CONFIG.offers.manualItineraryBeta;
 const SENSITIVE_QUERY_KEYS = new Set([
   "xsec_token", "xsec_source", "access_token", "refresh_token", "auth_token",
-  "authorization", "api_key", "apikey", "signature", "sig",
+  "authorization", "api_key", "apikey", "signature", "sig", "igsh",
 ]);
 const INTERNAL_PATTERN =
-  /(?:\.workbuddy|\.claude|\/Users\/|\/mnt\/|[A-Za-z]:[\\/](?:Users|Documents and Settings)[\\/]|%USERPROFILE%|https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?|sourceRefs?|sourceIds?|mediaIds?|confidenceScore|detailLookupAudit|nameSource|hostChecks|platformAccess|platformItemId|platformEngagement|failureCode|paidPlanningReady|宿主诊断|schemaVersion|paymentCode|operationId|tombstones?)/i;
-const CONTENT_LEAK_PATTERN = /(?:\.workbuddy|\.claude|\/Users\/|\/mnt\/|[A-Za-z]:[\\/](?:Users|Documents and Settings)[\\/]|%USERPROFILE%|https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?|宿主诊断)/i;
+  /(?:\.workbuddy|\.claude|%USERPROFILE%|https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?|sourceRefs?|sourceIds?|mediaIds?|confidenceScore|detailLookupAudit|nameSource|hostChecks|platformAccess|platformItemId|platformEngagement|failureCode|paidPlanningReady|宿主诊断|schemaVersion|paymentCode|operationId|tombstones?)/i;
+const CONTENT_LEAK_PATTERN = /(?:\.workbuddy|\.claude|%USERPROFILE%|https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?|宿主诊断)/i;
+const LOCAL_PATH_PATTERN = /(?:(?:^|[^A-Za-z0-9:])\/(?:Applications|Library|System|Users|bin|dev|etc|home|lib64?|media|mnt|opt|private|proc|root|run|sbin|srv|tmp|usr|var|Volumes|workspace)\/|(?:^|[^A-Za-z0-9])[A-Za-z]:[\\/]|(?:^|[^\\/])\\\\[^\\/\s<>:"|?*]+[\\/][^\\/\s<>:"|?*]+)/im;
 const SECRET_PATTERN = /(?:-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\b(?:sk|rk|pk)_[A-Za-z0-9]{20,}\b|\bBearer\s+[A-Za-z0-9._~+/=-]{16,})/i;
+const CUSTOMER_CREDENTIAL_PATTERN = /(?:\b(?:xsec[_-]?token|xsec[_-]?source|auth[_-]?token|authorization|api[_-]?key|apikey|access[_-]?token|refresh[_-]?token|password|cookie)[ \t]*[:=][ \t]*[^\s,;<>"']{8,}|\b(?:signature|sig|igsh)[ \t]*[:=][ \t]*(?=[^\s,;<>"']{12,})[A-Za-z0-9._~+/=-]{12,})/i;
+const BLOCKED_HOST_SUFFIXES = [".localhost", ".local", ".lan", ".internal", ".home", ".home.arpa"];
+
+function decodeHtmlEntities(value) {
+  const named = {amp: "&", quot: '"', apos: "'", lt: "<", gt: ">"};
+  let decoded = String(value);
+  for (let pass = 0; pass < 3; pass += 1) {
+    const next = decoded.replace(/&(?:#(\d+)|#x([0-9a-f]+)|(amp|quot|apos|lt|gt));/gi, (_match, decimal, hex, name) => {
+      if (decimal) return String.fromCodePoint(Number.parseInt(decimal, 10));
+      if (hex) return String.fromCodePoint(Number.parseInt(hex, 16));
+      return named[String(name).toLowerCase()] || _match;
+    });
+    if (next === decoded) break;
+    decoded = next;
+  }
+  return decoded;
+}
+
+function normalizeCredentialWhitespace(value) {
+  const keys = "xsec[_-]?token|xsec[_-]?source|auth[_-]?token|authorization|api[_-]?key|apikey|access[_-]?token|refresh[_-]?token|password|cookie|signature|sig|igsh";
+  const sameLine = String(value).replace(
+    new RegExp(`\\b(${keys})[ \\t]{0,4}([:=])[ \\t]{0,4}`, "gi"),
+    (_match, key, delimiter) => `${key}${delimiter}`,
+  );
+  return sameLine.replace(
+    new RegExp(
+      `\\b(${keys})([ \\t\\r\\n]{0,8})([:=])([ \\t\\r\\n]{0,8})(?=[A-Za-z0-9._~+/=-]{16,})`,
+      "gi",
+    ),
+    (match, key, before, delimiter, after) => {
+      const whitespace = `${before}${after}`;
+      if (!/[\r\n]/.test(whitespace) || whitespace.length > 8) return match;
+      return `${key}${delimiter}`;
+    },
+  );
+}
 
 function contentForSecretScan(html) {
-  return html
-    .replace(/data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+/g, "[embedded-image]");
+  return normalizeCredentialWhitespace(decodeHtmlEntities(
+    html.replace(/data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+/g, "[embedded-image]")
+  ));
 }
 
 function customerTextForScan(html) {
@@ -39,7 +72,7 @@ function customerTextForScan(html) {
 function clean(value, max = 260, field = "content") {
   const text = String(value ?? "").replace(/\s+/g, " ").trim();
   if (!text) return "";
-  if (CONTENT_LEAK_PATTERN.test(text)) {
+  if (CONTENT_LEAK_PATTERN.test(text) || LOCAL_PATH_PATTERN.test(text)) {
     return "";
   }
   return text.slice(0, max);
@@ -55,14 +88,17 @@ function assertSafeUrlAttributes(html) {
     } catch {
       throw new Error(`unsafe customer URL attribute: ${raw.slice(0, 80)}`);
     }
-    if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("unsafe customer URL protocol");
-    const host = parsed.hostname.toLowerCase();
-    if (host === "localhost" || host === "127.0.0.1" || host === "::1") {
+    if (parsed.protocol !== "https:") throw new Error("unsafe customer URL protocol");
+    const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    if (parsed.username || parsed.password || (parsed.port && parsed.port !== "443")) {
+      throw new Error("unsafe customer URL host");
+    }
+    if (host === "localhost" || (!host.includes(".") && !net.isIP(host)) || BLOCKED_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix))) {
       throw new Error("unsafe customer URL host");
     }
     if (net.isIP(host)) {
-      const privateIpv4 = /^(?:0\.|10\.|127\.|169\.254\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(host);
-      const privateIpv6 = /^(?:::|fc|fd|fe8|fe9|fea|feb)/i.test(host);
+      const privateIpv4 = /^(?:0\.|10\.|127\.|169\.254\.|192\.(?:0\.|168\.)|172\.(?:1[6-9]|2\d|3[01])\.|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|198\.(?:18|19)\.|(?:22[4-9]|23\d|24\d|25[0-5])\.)/.test(host);
+      const privateIpv6 = /^(?:::|fc|fd|fe8|fe9|fea|feb|2001:db8|ff)/i.test(host);
       if (privateIpv4 || privateIpv6) throw new Error("unsafe customer URL host");
     }
   }
@@ -70,12 +106,19 @@ function assertSafeUrlAttributes(html) {
 
 function dataUrlFromPath(file, baseDir) {
   if (!file || /^https?:\/\//i.test(file)) return "";
-  const resolved = path.resolve(baseDir, file);
-  const relative = path.relative(path.resolve(baseDir), resolved);
+  const lexicalBase = path.resolve(baseDir);
+  const resolved = path.resolve(lexicalBase, file);
+  const relative = path.relative(lexicalBase, resolved);
   if (relative.startsWith(`..${path.sep}`) || relative === ".." || path.isAbsolute(relative)) {
     throw new Error("unsafe local image path outside passport directory");
   }
   if (!fs.existsSync(resolved)) return "";
+  const realBase = fs.realpathSync(lexicalBase);
+  const realResolved = fs.realpathSync(resolved);
+  const realRelative = path.relative(realBase, realResolved);
+  if (realRelative.startsWith(`..${path.sep}`) || realRelative === ".." || path.isAbsolute(realRelative)) {
+    throw new Error("unsafe local image path outside passport directory");
+  }
   const stat = fs.lstatSync(resolved);
   if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_PHOTO_BYTES) return "";
   const mime = {".png":"image/png",".jpg":"image/jpeg",".jpeg":"image/jpeg",".webp":"image/webp"}[
@@ -150,17 +193,55 @@ function publicAuditLinks(items) {
 }
 
 function customerSafeUrl(value) {
-  if (!/^https?:\/\//i.test(value || "")) return "";
+  if (!/^https:\/\//i.test(value || "")) return "";
   let parsed;
   try {
     parsed = new URL(value);
   } catch {
     return "";
   }
+  const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (
+    parsed.protocol !== "https:"
+    || parsed.username
+    || parsed.password
+    || (parsed.port && parsed.port !== "443")
+    || host === "localhost"
+    || (!host.includes(".") && !net.isIP(host))
+    || BLOCKED_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix))
+  ) return "";
+  if (net.isIP(host)) {
+    const privateIpv4 = /^(?:0\.|10\.|127\.|169\.254\.|192\.(?:0\.|168\.)|172\.(?:1[6-9]|2\d|3[01])\.|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|198\.(?:18|19)\.|(?:22[4-9]|23\d|24\d|25[0-5])\.)/.test(host);
+    const privateIpv6 = /^(?:::|fc|fd|fe8|fe9|fea|feb|2001:db8|ff)/i.test(host);
+    if (privateIpv4 || privateIpv6) return "";
+  }
   for (const key of [...parsed.searchParams.keys()]) {
-    if (SENSITIVE_QUERY_KEYS.has(key.toLowerCase())) parsed.searchParams.delete(key);
+    if (SENSITIVE_QUERY_KEYS.has(key.toLowerCase().replaceAll("-", "_"))) parsed.searchParams.delete(key);
   }
   return parsed.toString();
+}
+
+function atomicWriteFile(outputPath, content) {
+  const directory = path.dirname(path.resolve(outputPath));
+  const temporary = path.join(directory, `.${path.basename(outputPath)}.${process.pid}.${Date.now()}.tmp`);
+  let descriptor;
+  try {
+    descriptor = fs.openSync(temporary, "wx", 0o600);
+    fs.writeFileSync(descriptor, content, {encoding: "utf8"});
+    fs.fsyncSync(descriptor);
+    fs.closeSync(descriptor);
+    descriptor = undefined;
+    try { fs.chmodSync(temporary, 0o600); } catch {}
+    fs.renameSync(temporary, outputPath);
+    try {
+      const directoryDescriptor = fs.openSync(directory, "r");
+      try { fs.fsyncSync(directoryDescriptor); } finally { fs.closeSync(directoryDescriptor); }
+    } catch {}
+  } catch (error) {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
+    try { fs.unlinkSync(temporary); } catch {}
+    throw error;
+  }
 }
 
 function verificationPanel(place, en) {
@@ -207,80 +288,48 @@ function publicAreas(places, en) {
   return [...counts.entries()].slice(0, 8);
 }
 
-function requestOption(value, label) {
-  return `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`;
-}
-
-function formCopy(en, key) {
-  return FORM_COPY[`${key}${en ? "En" : "Zh"}`];
-}
-
-function requestCard(report, locale, placeCount) {
-  const en = locale === "en-US";
-  const destination = clean(report.destination, 80);
-  const fallbackUrl = new URL(FALLBACK_URL);
-  fallbackUrl.searchParams.set("destination", destination);
-  fallbackUrl.searchParams.set("locale", locale);
-  fallbackUrl.searchParams.set("placeCount", String(placeCount));
-  return `<section class="upgrade">
-    <div class="upgrade-copy" aria-labelledby="paid-options-title">
-      <p class="kicker">KORNVIA · ${escapeHtml(formCopy(en, "sectionKicker"))}</p>
-      <h2 id="paid-options-title">${escapeHtml(formCopy(en, "sectionTitle"))}</h2>
-      <div class="tier-list">
-        <article class="tier-card free-tier">
-          <p class="tier-name">${escapeHtml(en ? FREE_OFFER.nameEn : FREE_OFFER.nameZh)}</p>
-          <p class="tier-price">${escapeHtml(en ? FREE_OFFER.priceEn : FREE_OFFER.price)}</p>
-          <ul>${(en ? FREE_OFFER.featuresEn : FREE_OFFER.featuresZh).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
-        </article>
-        <article class="tier-card recommended-tier">
-          <p class="recommended-label">${escapeHtml(formCopy(en, "recommendedLabel"))}</p>
-          <p class="tier-name">${escapeHtml(en ? MANUAL_OFFER.nameEn : MANUAL_OFFER.nameZh)}</p>
-          <p class="tier-price">${escapeHtml(MANUAL_OFFER.price)}</p>
-          <p>${escapeHtml(en ? MANUAL_OFFER.descriptionEn : MANUAL_OFFER.descriptionZh)}</p>
-          <p class="availability">${escapeHtml(en ? MANUAL_OFFER.availabilityEn : MANUAL_OFFER.availabilityZh)}</p>
-          <p class="service-boundary">${escapeHtml(en ? MANUAL_OFFER.exclusionsEn.join(" · ") : MANUAL_OFFER.exclusionsZh.join(" · "))}</p>
-        </article>
-      </div>
-    </div>
-    <form class="request-form" action="${CTA_URL}" method="post" target="_blank" rel="noopener noreferrer" accept-charset="UTF-8">
-      <input type="hidden" name="locale" value="${locale}">
-      <input type="hidden" name="placeCount" value="${placeCount}">
-      <input type="hidden" name="offerId" value="${escapeHtml(PRODUCT_CONFIG.form.publicOfferId)}">
-      <div class="honeypot" aria-hidden="true"><label>Website<input name="website" tabindex="-1" autocomplete="off"></label></div>
-      <h3>${escapeHtml(formCopy(en, "requestTitle"))}</h3>
-      <div class="request-grid">
-        <label>${escapeHtml(formCopy(en, "destinationLabel"))}<input name="destination" value="${escapeHtml(destination)}" required maxlength="80" autocomplete="address-level1"></label>
-        <label>${escapeHtml(formCopy(en, "startDateLabel"))}<input name="startDate" type="date" required></label>
-        <label>${escapeHtml(formCopy(en, "daysLabel"))}<select name="days" required>
-          ${requestOption("", formCopy(en, "selectLabel"))}
-          ${requestOption("3", en ? "3 days" : "3 天")}
-          ${requestOption("4", en ? "4 days" : "4 天")}
-          ${requestOption("5", en ? "5 days" : "5 天")}
-          ${requestOption("6", en ? "6 days" : "6 天")}
-          ${requestOption("7", en ? "7 days" : "7 天")}
-        </select></label>
-        <label>${escapeHtml(formCopy(en, "contactLabel"))}<input name="contact" required maxlength="120" placeholder="${escapeHtml(formCopy(en, "contactPlaceholder"))}"></label>
-        <label class="full">${escapeHtml(formCopy(en, "notesLabel"))}<textarea name="notes" maxlength="1200" placeholder="${escapeHtml(formCopy(en, "notesPlaceholder"))}"></textarea></label>
-      </div>
-      <button class="submit" type="submit">${escapeHtml(formCopy(en, "submit"))}</button>
-      <div class="request-notice">
-        <p><strong>${escapeHtml(formCopy(en, "purposeLabel"))}</strong>${escapeHtml(en ? PRODUCT_CONFIG.form.privacy.purposeEn : PRODUCT_CONFIG.form.privacy.purposeZh)}</p>
-        <p><strong>${escapeHtml(formCopy(en, "handlingLabel"))}</strong>${escapeHtml(en ? PRODUCT_CONFIG.form.privacy.handlingEn : PRODUCT_CONFIG.form.privacy.handlingZh)}</p>
-        <p><strong>${escapeHtml(formCopy(en, "boundaryLabel"))}</strong>${escapeHtml(en ? PRODUCT_CONFIG.form.privacy.boundaryEn : PRODUCT_CONFIG.form.privacy.boundaryZh)}</p>
-      </div>
-      <p class="payment-flow">${escapeHtml(en ? PRODUCT_CONFIG.paymentWorkflow.copyEn : PRODUCT_CONFIG.paymentWorkflow.copyZh)}</p>
-      <p class="fallback">${escapeHtml(formCopy(en, "fallbackPrefix"))}<a href="${escapeHtml(fallbackUrl.toString())}" target="_blank" rel="noopener noreferrer">${escapeHtml(formCopy(en, "fallbackLink"))}</a>${en ? "." : "。"}</p>
-    </form>
+function routePlanSection(plan, en) {
+  if (!plan || !Array.isArray(plan.days) || !plan.days.length) return "";
+  const days = plan.days;
+  const routeMap = days.map((day) => `<article class="map-day">
+    <div class="map-day-head"><span>DAY ${String(day.day || 0).padStart(2, "0")}</span><strong>${escapeHtml(clean(day.title, 140))}</strong></div>
+    <div class="map-line">${(day.stops || []).map((stop, index) => `<div class="map-stop">
+      <span class="map-dot">${String(index + 1).padStart(2, "0")}</span>
+      <span><b>${escapeHtml(clean(stop.name, 120))}</b><small>${escapeHtml(clean(stop.timeLabel, 60))}</small></span>
+    </div>`).join("")}</div>
+  </article>`).join("");
+  const dayCards = days.map((day) => `<article class="day-card">
+    <header><span>DAY ${String(day.day || 0).padStart(2, "0")}</span><h3>${escapeHtml(clean(day.title, 140))}</h3></header>
+    ${day.summary ? `<p class="day-summary">${escapeHtml(clean(day.summary, 420))}</p>` : ""}
+    <ol>${(day.stops || []).map((stop) => `<li><div><span>${escapeHtml(clean(stop.timeLabel, 60))}</span><strong>${escapeHtml(clean(stop.name, 120))}</strong></div>
+      ${stop.address ? `<p>${escapeHtml(clean(stop.address, 220))}</p>` : ""}
+      ${stop.note ? `<p>${escapeHtml(clean(stop.note, 320))}</p>` : ""}</li>`).join("")}</ol>
+    ${(day.connections || []).length ? `<div class="connections">${day.connections.map((connection) => `<p><strong>${escapeHtml(clean(connection.from, 100))} → ${escapeHtml(clean(connection.to, 100))}</strong><span>${escapeHtml(clean(connection.modeLabel, 80))}${connection.durationText ? ` · ${escapeHtml(clean(connection.durationText, 120))}` : ""} · ${escapeHtml(clean(connection.statusLabel, 80))}</span>${connection.note ? `<small>${escapeHtml(clean(connection.note, 220))}</small>` : ""}</p>`).join("")}</div>` : ""}
+  </article>`).join("");
+  const unassigned = Array.isArray(plan.unassigned) ? plan.unassigned : [];
+  return `<section class="journey-plan" aria-labelledby="route-plan-title">
+    <div class="journey-heading"><div><p class="kicker">${en ? "DAY-BY-DAY PLAN" : "逐日行程"}</p><h2 id="route-plan-title">${escapeHtml(clean(plan.title, 180) || (en ? "Your day-by-day route" : "按天想去路线"))}</h2></div>
+      <div class="route-status"><strong>${escapeHtml(clean(plan.generationLabel, 120))}</strong><span>${escapeHtml(clean(plan.mapLabel, 120))}</span></div></div>
+    <div class="route-map" aria-label="${en ? "Schematic route map" : "示意路线图"}">${routeMap}</div>
+    <div class="day-grid">${dayCards}</div>
+    ${unassigned.length ? `<aside class="unassigned"><strong>${en ? "Saved for another route" : "本轮未排入"}</strong><ul>${unassigned.map((item) => `<li>${escapeHtml(clean(item.name, 120))}${item.reason ? `：${escapeHtml(clean(item.reason, 220))}` : ""}</li>`).join("")}</ul></aside>` : ""}
+    <p class="route-boundary">${escapeHtml(clean(plan.boundary, 420))}</p>
   </section>`;
 }
 
-function card(place, locale, baseDir) {
+function card(place, locale, baseDir, mapRegion, destination) {
   const en = locale === "en-US";
   const route = clean(
     place.routeText ||
     ([place.routeStart, ...(place.waypoints || []), place.routeEnd].filter(Boolean).join(" → ")),
   );
   const links = publicLinks(place);
+  const query = [place.displayName || place.name, place.branch, place.address || place.positionText, destination].filter(Boolean).join(" ");
+  const mapSearch = mapRegion === "mainland"
+    ? `https://uri.amap.com/search?${new URLSearchParams({keyword: query})}`
+    : mapRegion === "outside_mainland"
+      ? `https://www.google.com/maps/search/?${new URLSearchParams({api: "1", query})}`
+      : "";
   return `<article class="card">${photoFor(place, baseDir)}
     <div class="body">
       <p class="eyebrow">${escapeHtml(clean(place.category || (en ? "SAVED PLACE" : "想去地点"), 60))}</p>
@@ -298,6 +347,7 @@ function card(place, locale, baseDir) {
         ${fact(en ? "Before you go" : "出发提醒", place.visitTip)}
       </dl>
       ${route ? `<div class="route"><strong>${en ? "Route" : "路线"}</strong><br>${escapeHtml(route)}</div>` : ""}
+      ${mapSearch ? `<p><a class="button" href="${escapeHtml(mapSearch)}" target="_blank" rel="noopener noreferrer">${mapRegion === "mainland" ? (en ? "Search Amap" : "高德地图搜索") : (en ? "Search Google Maps" : "Google 地图搜索")}</a></p>` : ""}
       ${verificationPanel(place, en)}
       ${riskPanel(place.executionRisks, en)}
       ${links.length ? `<div class="sources">${links.map((url) =>
@@ -314,14 +364,10 @@ function render(report, inputPath) {
   const places = Array.isArray(report.places) ? report.places : [];
   const retained = Math.max(0, Number(report.retainedClueCount || 0));
   const destination = clean(report.destination, 80) || (en ? "MY TRIP" : "我的旅程");
-  const requestedMode = report.presentation?.contentDepth || report.presentation?.contentMode;
-  const contentMode = ["deep", "standard", "compact"].includes(requestedMode)
-    ? requestedMode
-    : "standard";
   const sourceLinkCount = places.reduce((sum, place) => sum + publicLinks(place).length, 0);
   const areas = publicAreas(places, en);
   const baseDir = path.dirname(inputPath);
-  const visitorMode = report.presentation?.visitorMode === true;
+  const dayCount = Array.isArray(report.routePlan?.days) ? report.routePlan.days.length : 0;
   const html = `<!doctype html><html lang="${en ? "en" : "zh-CN"}"><head><meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title>
   <style>${KORNVIA_REPORT_CSS}</style></head><body><main class="shell">
@@ -333,20 +379,19 @@ function render(report, inputPath) {
         <div class="hero-meta" aria-label="${en ? "Passport summary" : "护照摘要"}">
           <div><span>${en ? "PLACES" : "地点"}</span><strong>${places.length}</strong></div>
           <div><span>${en ? "SOURCES" : "原始链接"}</span><strong>${sourceLinkCount}</strong></div>
-          <div><span>${en ? "STATUS" : "状态"}</span><strong>READY</strong></div>
+          <div><span>${en ? "STATUS" : "状态"}</span><strong>${en ? "READY" : "已整理"}</strong></div>
         </div>
       </div>
       <aside class="hero-stub" aria-label="${en ? "Trip document stub" : "行程票存根"}">
         <div><span class="stub-label">DESTINATION</span><p class="stub-destination">${escapeHtml(destination)}</p></div>
         <div class="stub-facts">
-          <div><span class="stub-label">VIEW</span><strong>${escapeHtml(contentMode.toUpperCase())}</strong></div>
+          <div><span class="stub-label">${en ? "DAYS" : "行程天数"}</span><strong>${dayCount || "—"}</strong></div>
           <div><span class="stub-label">PLACES</span><strong>${places.length}</strong></div>
-          <div><span class="stub-label">SOURCE</span><strong>${sourceLinkCount ? "LINK" : "NONE"}</strong></div>
+          <div><span class="stub-label">${en ? "SOURCE" : "原始链接"}</span><strong>${sourceLinkCount ? (en ? "YES" : "有") : (en ? "NONE" : "无")}</strong></div>
         </div>
         <p class="stub-note">KORNVIA TRIP DOCUMENT<br>${en ? "ORIGINAL IMAGES AND SOURCES RETAINED" : "原图保留，来源可追溯"}</p>
       </aside>
     </header>
-    ${visitorMode ? `<aside class="retained">${en ? "Visitor view: customer-safe fields only." : "访客查看版：仅展示客户可见字段。"}</aside>` : ""}
     <section class="manifest" aria-labelledby="manifest-title">
       <div class="manifest-copy"><p class="kicker">TRIP MANIFEST</p>
         <h2 id="manifest-title">${en ? "A want-to-go itinerary you can take with you" : "一张能带走的想去行程单"}</h2>
@@ -356,12 +401,12 @@ function render(report, inputPath) {
         <div class="route-stop"><span class="stop-number">${String(index + 1).padStart(2, "0")}</span><span class="route-name">${escapeHtml(area)}</span><span class="route-count">${count} ${en ? "PLACE" : "个地点"}</span></div>`).join("")}
       </div>
     </section>
-    <section class="grid">${places.map((place) => card(place, locale, baseDir)).join("")}</section>
+    ${routePlanSection(report.routePlan, en)}
+    <section class="grid">${places.map((place) => card(place, locale, baseDir, report.mapRegion, destination)).join("")}</section>
     ${riskPanel(report.tripRisks, en, "trip-risks")}
     ${retained ? `<aside class="retained">${en
       ? `${retained} more saved place clue${retained === 1 ? "" : "s"} remain in your library and can be added after verification.`
       : `另有 ${retained} 条地点线索已保留，核实后可补进下一版。`}</aside>` : ""}
-    ${requestCard(report, locale, places.length)}
   </main><!-- ${REPORT_TEMPLATE_VERSION} --></body></html>`;
   return html.replace(/[ \t]+$/gm, "");
 }
@@ -373,11 +418,18 @@ function main() {
   if (!stat.isFile() || stat.size > MAX_INPUT_BYTES) throw new Error("invalid input");
   const report = JSON.parse(fs.readFileSync(inputPath, "utf8"));
   if (!Array.isArray(report.places) || report.places.length === 0) throw new Error("no deliverable places");
+  if (report.placesOnly !== true && (!Array.isArray(report.routePlan?.days) || report.routePlan.days.length === 0)) throw new Error("no route plan");
   const html = render(report, inputPath);
   assertSafeUrlAttributes(html);
-  if (INTERNAL_PATTERN.test(customerTextForScan(html))) throw new Error("customer output contains internal text");
-  if (SECRET_PATTERN.test(contentForSecretScan(html))) throw new Error("customer output contains secret-like text");
-  fs.writeFileSync(outputPath, html);
+  const customerScanContent = customerTextForScan(html);
+  if (INTERNAL_PATTERN.test(customerScanContent) || LOCAL_PATH_PATTERN.test(customerScanContent)) {
+    throw new Error("customer output contains internal text");
+  }
+  const secretScanContent = contentForSecretScan(html);
+  if (SECRET_PATTERN.test(secretScanContent) || CUSTOMER_CREDENTIAL_PATTERN.test(secretScanContent)) {
+    throw new Error("customer output contains secret-like text");
+  }
+  atomicWriteFile(outputPath, html);
   const en = report.locale === "en-US";
   process.stdout.write(`${en ? PRODUCT_CONFIG.copy.passportReadyEn : PRODUCT_CONFIG.copy.passportReadyZh}\n`);
 }
@@ -390,6 +442,7 @@ function rendererErrorCode(error) {
   if (message.includes("internal text")) return "CUSTOMER_INTERNAL_LEAK";
   if (message.includes("secret-like")) return "CUSTOMER_SECRET_LEAK";
   if (message.includes("no deliverable places")) return "NO_DELIVERABLE_PLACES";
+  if (message.includes("no route plan")) return "NO_ROUTE_PLAN";
   if (message.includes("invalid input") || message.includes("usage:")) return "INVALID_RENDER_INPUT";
   return "RENDER_FAILED";
 }
@@ -412,6 +465,7 @@ const RENDER_ERROR_MESSAGES = {
     CUSTOMER_INTERNAL_LEAK: "客户页面包含内部字段或本地路径，已阻止生成。",
     CUSTOMER_SECRET_LEAK: "客户页面包含疑似密钥或凭证，已阻止生成。",
     NO_DELIVERABLE_PLACES: "没有可交付地点，请先补齐并确认地点信息。",
+    NO_ROUTE_PLAN: "缺少按天路线；请先完成行程问诊并保存逐日路线。",
     INVALID_RENDER_INPUT: "护照输入文件缺失、过大或格式不正确。",
     RENDER_FAILED: "护照页面生成失败，请检查输入数据后重试。",
   },
@@ -422,6 +476,7 @@ const RENDER_ERROR_MESSAGES = {
     CUSTOMER_INTERNAL_LEAK: "The customer page contains an internal field or local path, so rendering was blocked.",
     CUSTOMER_SECRET_LEAK: "The customer page contains a possible secret or credential, so rendering was blocked.",
     NO_DELIVERABLE_PLACES: "There are no deliverable places. Complete and confirm place details first.",
+    NO_ROUTE_PLAN: "The day-by-day route is missing. Complete trip intake and save the day-by-day route first.",
     INVALID_RENDER_INPUT: "The passport input file is missing, too large or invalid.",
     RENDER_FAILED: "The passport page could not be generated. Check the input data and retry.",
   },

@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://kornvia.com/contracts/want-to-go/2.3.0/schema.json",
+  "$id": "https://kornvia.com/contracts/want-to-go/2.4.0/schema.json",
   "title": "Kornvia Want-to-Go shared data contract",
-  "description": "Version 2.3.0 contract shared by the local Skill and read-only website consumers.",
+  "description": "Version 2.4.0 contract shared by the local Skill and read-only website consumers.",
   "type": "object",
   "required": [
     "schemaVersion",
@@ -16,360 +16,1277 @@
     "media",
     "verificationSnapshots",
     "tripRequests",
+    "routePlans",
     "events",
     "tombstones"
   ],
   "properties": {
-    "schemaVersion": {"const": "2.3.0"},
-    "id": {"type": "string", "minLength": 1},
-    "revision": {"type": "integer", "minimum": 0},
-    "createdAt": {"$ref": "#/$defs/timestamp"},
-    "updatedAt": {"$ref": "#/$defs/timestamp"},
-    "destinations": {"type": "array", "items": {"$ref": "#/$defs/destination"}},
-    "places": {"type": "array", "items": {"$ref": "#/$defs/place"}},
-    "sources": {"type": "array", "items": {"$ref": "#/$defs/source"}},
-    "media": {"type": "array", "items": {"$ref": "#/$defs/media"}},
-    "verificationSnapshots": {"type": "array", "items": {"$ref": "#/$defs/verificationSnapshot"}},
-    "tripRequests": {"type": "array", "items": {"$ref": "#/$defs/tripRequest"}},
-    "events": {"type": "array", "items": {"$ref": "#/$defs/event"}},
-    "tombstones": {"type": "array", "items": {"$ref": "#/$defs/tombstone"}},
-    "ingestBatches": {"type": "array", "items": {"$ref": "#/$defs/ingestBatch"}},
+    "schemaVersion": {
+      "const": "2.4.0"
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "createdAt": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "updatedAt": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "destinations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/destination"
+      }
+    },
+    "places": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/place"
+      }
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/source"
+      }
+    },
+    "media": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/media"
+      }
+    },
+    "verificationSnapshots": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/verificationSnapshot"
+      }
+    },
+    "tripRequests": {
+      "type": "array",
+      "description": "Opaque historical records retained in existing private libraries. Never emitted by the public passport."
+    },
+    "routePlans": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/routePlan"
+      }
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/event"
+      }
+    },
+    "tombstones": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/tombstone"
+      }
+    },
+    "ingestBatches": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ingestBatch"
+      }
+    },
     "bundles": {
       "type": "array",
       "description": "Deprecated raw-ingest compatibility ledger retained for lossless 1.2.3 migration. Website consumers must use sources and media.",
       "deprecated": true,
-      "items": {"type": "object"}
+      "items": {
+        "type": "object"
+      }
     }
   },
   "additionalProperties": false,
   "$defs": {
-    "timestamp": {"type": "string", "format": "date-time"},
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
     "sourcePolicy": {
       "type": "object",
-      "required": ["version", "accessLevel", "canSupport", "cannotProve", "untrustedInstructionsDetected"],
+      "required": [
+        "version",
+        "accessLevel",
+        "canSupport",
+        "cannotProve",
+        "untrustedInstructionsDetected"
+      ],
       "properties": {
-        "version": {"const": "2.3.0"},
-        "accessLevel": {"enum": ["submitted", "local_only", "public_readable", "public_blocked", "unavailable"]},
-        "canSupport": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
-        "cannotProve": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
-        "untrustedInstructionsDetected": {"type": "boolean"},
-        "untrustedInstructionExcerpts": {"type": "array", "items": {"type": "string", "maxLength": 240}}
+        "version": {
+          "const": "2.3.0"
+        },
+        "accessLevel": {
+          "enum": [
+            "submitted",
+            "local_only",
+            "public_readable",
+            "public_blocked",
+            "unavailable"
+          ]
+        },
+        "canSupport": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "cannotProve": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "untrustedInstructionsDetected": {
+          "type": "boolean"
+        },
+        "untrustedInstructionExcerpts": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 240
+          }
+        }
       },
       "additionalProperties": false
     },
     "platformAccess": {
       "type": "object",
       "description": "Internal platform adapter result. Website customer HTML must not render this object.",
-      "required": ["mode", "status", "checkedAt", "capabilities", "limitations"],
+      "required": [
+        "mode",
+        "status",
+        "checkedAt",
+        "capabilities",
+        "limitations"
+      ],
       "properties": {
-        "mode": {"type": "string", "minLength": 1},
-        "status": {"enum": ["readable", "security_check_required", "input_incomplete", "unavailable"]},
-        "checkedAt": {"$ref": "#/$defs/timestamp"},
-        "capabilities": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
-        "limitations": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+        "mode": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "readable",
+            "security_check_required",
+            "input_incomplete",
+            "unavailable"
+          ]
+        },
+        "checkedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        }
       },
       "additionalProperties": false
     },
     "auditSource": {
       "type": "object",
-      "required": ["url", "label", "kind"],
+      "required": [
+        "url",
+        "label",
+        "kind"
+      ],
       "properties": {
-        "url": {"type": "string", "format": "uri", "pattern": "^https?://"},
-        "label": {"type": "string", "minLength": 1},
-        "kind": {"enum": ["official", "reliable_public"]}
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https?://"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "official",
+            "reliable_public"
+          ]
+        }
       },
       "additionalProperties": false
     },
     "factAudit": {
       "type": "object",
-      "required": ["field", "status", "sources", "cannotProve", "nextAction"],
+      "required": [
+        "field",
+        "status",
+        "sources",
+        "cannotProve",
+        "nextAction"
+      ],
       "properties": {
-        "field": {"type": "string", "minLength": 1},
-        "status": {"enum": ["unverified", "verified", "conflict", "not_found", "stale"]},
-        "checkedAt": {"$ref": "#/$defs/timestamp"},
-        "validUntil": {"$ref": "#/$defs/timestamp"},
-        "sources": {"type": "array", "items": {"$ref": "#/$defs/auditSource"}},
-        "cannotProve": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
-        "nextAction": {"type": "string"}
+        "field": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "unverified",
+            "verified",
+            "conflict",
+            "not_found",
+            "stale"
+          ]
+        },
+        "checkedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "validUntil": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/auditSource"
+          }
+        },
+        "cannotProve": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "nextAction": {
+          "type": "string"
+        }
       },
       "additionalProperties": false
     },
     "executionRisk": {
       "type": "object",
-      "required": ["type", "scope", "status", "summary", "sources", "cannotProve", "nextAction"],
+      "required": [
+        "type",
+        "scope",
+        "status",
+        "summary",
+        "sources",
+        "cannotProve",
+        "nextAction"
+      ],
       "properties": {
-        "type": {"enum": ["last_mile", "reservation_ticket", "weather_sensitive", "temporary_closure", "transfer_buffer"]},
-        "scope": {"enum": ["place", "route", "trip"]},
-        "status": {"enum": ["unverified", "verified", "conflict", "not_found", "stale"]},
-        "summary": {"type": "string"},
-        "checkedAt": {"$ref": "#/$defs/timestamp"},
-        "validUntil": {"$ref": "#/$defs/timestamp"},
-        "sources": {"type": "array", "items": {"$ref": "#/$defs/auditSource"}},
-        "cannotProve": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
-        "nextAction": {"type": "string"}
+        "type": {
+          "enum": [
+            "last_mile",
+            "reservation_ticket",
+            "weather_sensitive",
+            "temporary_closure",
+            "transfer_buffer"
+          ]
+        },
+        "scope": {
+          "enum": [
+            "place",
+            "route",
+            "trip"
+          ]
+        },
+        "status": {
+          "enum": [
+            "unverified",
+            "verified",
+            "conflict",
+            "not_found",
+            "stale"
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "checkedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "validUntil": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/auditSource"
+          }
+        },
+        "cannotProve": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "nextAction": {
+          "type": "string"
+        }
       },
       "additionalProperties": false
     },
     "verificationItem": {
       "type": "object",
-      "required": ["placeId", "accessLevel", "canSupport", "cannotProve", "facts", "factAudits", "executionRisks"],
+      "required": [
+        "placeId",
+        "accessLevel",
+        "canSupport",
+        "cannotProve",
+        "facts",
+        "factAudits",
+        "executionRisks"
+      ],
       "properties": {
-        "placeId": {"type": "string", "minLength": 1},
-        "accessLevel": {"enum": ["submitted", "local_only", "public_readable", "public_blocked", "unavailable"]},
-        "canSupport": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
-        "cannotProve": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
-        "facts": {"type": "object"},
-        "factAudits": {"type": "array", "items": {"$ref": "#/$defs/factAudit"}},
-        "executionRisks": {"type": "array", "items": {"$ref": "#/$defs/executionRisk"}}
+        "placeId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "accessLevel": {
+          "enum": [
+            "submitted",
+            "local_only",
+            "public_readable",
+            "public_blocked",
+            "unavailable"
+          ]
+        },
+        "canSupport": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "cannotProve": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "facts": {
+          "type": "object"
+        },
+        "factAudits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/factAudit"
+          }
+        },
+        "executionRisks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/executionRisk"
+          }
+        }
       },
       "additionalProperties": false
     },
     "destination": {
       "type": "object",
-      "required": ["id", "key", "name", "status", "placeIds", "sourceIds", "sortOrder", "createdAt", "updatedAt"],
+      "required": [
+        "id",
+        "key",
+        "name",
+        "status",
+        "placeIds",
+        "sourceIds",
+        "sortOrder",
+        "createdAt",
+        "updatedAt"
+      ],
       "properties": {
-        "id": {"type": "string", "minLength": 1},
-        "key": {"type": "string", "minLength": 1},
-        "name": {"type": "string", "minLength": 1},
-        "status": {"enum": ["confirmed", "needs_confirmation", "archived"]},
-        "placeIds": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
-        "sourceIds": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
-        "aliases": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
-        "placeCount": {"type": "integer", "minimum": 0},
-        "sortOrder": {"type": "integer", "minimum": 0},
-        "createdAt": {"$ref": "#/$defs/timestamp"},
-        "updatedAt": {"$ref": "#/$defs/timestamp"},
-        "passportGeneratedAt": {"$ref": "#/$defs/timestamp"}
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "confirmed",
+            "needs_confirmation",
+            "archived"
+          ]
+        },
+        "placeIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "sourceIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "placeCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sortOrder": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "createdAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "passportGeneratedAt": {
+          "$ref": "#/$defs/timestamp"
+        }
       },
       "additionalProperties": false
     },
     "place": {
       "type": "object",
-      "required": ["id", "destinationKey", "destinationStatus", "name", "placeType", "sourceIds", "mediaIds", "sortOrder", "createdAt", "updatedAt"],
+      "required": [
+        "id",
+        "destinationKey",
+        "destinationStatus",
+        "name",
+        "placeType",
+        "sourceIds",
+        "mediaIds",
+        "sortOrder",
+        "createdAt",
+        "updatedAt"
+      ],
       "properties": {
-        "id": {"type": "string", "minLength": 1},
-        "destinationKey": {"type": "string", "minLength": 1},
-        "destinationStatus": {"enum": ["confirmed", "needs_confirmation"]},
-        "name": {"type": "string"},
-        "verifiedName": {"type": "string"},
-        "localName": {"type": "string"},
-        "placeType": {"enum": ["business", "venue", "public_space", "route"]},
-        "branch": {"type": "string"},
-        "address": {"type": "string"},
-        "positionText": {"type": "string"},
-        "openingHoursText": {"type": "string"},
-        "signature": {"type": "string"},
-        "visitTip": {"type": "string"},
-        "sourceIds": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
-        "mediaIds": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
-        "sortOrder": {"type": "integer", "minimum": 0},
-        "identityKey": {"type": "string"},
-        "nameSource": {"enum": ["user_named", "public_page", "material_ocr", "visual_review", "unresolved"]},
-        "nameRequiresConfirmation": {"type": "boolean"},
-        "routeStart": {"type": "string"},
-        "routeEnd": {"type": "string"},
-        "waypoints": {"type": "array", "items": {"type": "string"}},
-        "suggestedDuration": {"type": "string"},
-        "displayMediaId": {"type": "string"},
-        "detailLookupAudit": {"type": "array", "items": {"$ref": "#/$defs/factAudit"}},
-        "executionRisks": {"type": "array", "items": {"$ref": "#/$defs/executionRisk"}},
-        "createdAt": {"$ref": "#/$defs/timestamp"},
-        "updatedAt": {"$ref": "#/$defs/timestamp"}
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "destinationKey": {
+          "type": "string",
+          "minLength": 1
+        },
+        "destinationStatus": {
+          "enum": [
+            "confirmed",
+            "needs_confirmation"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "verifiedName": {
+          "type": "string"
+        },
+        "localName": {
+          "type": "string"
+        },
+        "placeType": {
+          "enum": [
+            "business",
+            "venue",
+            "public_space",
+            "route"
+          ]
+        },
+        "branch": {
+          "type": "string"
+        },
+        "address": {
+          "type": "string"
+        },
+        "positionText": {
+          "type": "string"
+        },
+        "openingHoursText": {
+          "type": "string"
+        },
+        "signature": {
+          "type": "string"
+        },
+        "visitTip": {
+          "type": "string"
+        },
+        "sourceIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "mediaIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "sortOrder": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "identityKey": {
+          "type": "string"
+        },
+        "nameSource": {
+          "enum": [
+            "user_named",
+            "public_page",
+            "material_ocr",
+            "visual_review",
+            "unresolved"
+          ]
+        },
+        "nameRequiresConfirmation": {
+          "type": "boolean"
+        },
+        "routeStart": {
+          "type": "string"
+        },
+        "routeEnd": {
+          "type": "string"
+        },
+        "waypoints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "suggestedDuration": {
+          "type": "string"
+        },
+        "displayMediaId": {
+          "type": "string"
+        },
+        "detailLookupAudit": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/factAudit"
+          }
+        },
+        "executionRisks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/executionRisk"
+          }
+        },
+        "createdAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/timestamp"
+        }
       },
       "additionalProperties": true
     },
     "source": {
       "type": "object",
-      "required": ["id", "ledgerVersion", "batchId", "group", "type", "status", "destinationKey", "submittedAt", "sourcePolicy", "mediaIds"],
+      "required": [
+        "id",
+        "ledgerVersion",
+        "batchId",
+        "group",
+        "type",
+        "status",
+        "destinationKey",
+        "submittedAt",
+        "sourcePolicy",
+        "mediaIds"
+      ],
       "properties": {
-        "id": {"type": "string", "minLength": 1},
-        "ledgerVersion": {"type": "integer", "minimum": 1},
-        "batchId": {"type": "string", "minLength": 1},
-        "group": {"type": "string", "minLength": 1},
-        "type": {"enum": ["screenshot", "link", "video", "text", "saved_html"]},
-        "status": {"enum": ["captured", "failed", "superseded"]},
-        "destinationKey": {"type": "string", "minLength": 1},
-        "destination": {"type": "string"},
-        "submittedAt": {"$ref": "#/$defs/timestamp"},
-        "submittedUrl": {"type": "string", "format": "uri", "pattern": "^https?://"},
-        "platform": {"enum": ["generic_web", "xiaohongshu", "ctrip", "wechat_official", "mafengwo", "douyin", "tiktok", "instagram", "youtube"]},
-        "platformItemId": {"type": "string"},
-        "platformAccess": {"$ref": "#/$defs/platformAccess"},
-        "sourcePolicy": {"$ref": "#/$defs/sourcePolicy"},
-        "mediaIds": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
-        "evidence": {"type": "object"},
-        "failureReason": {"type": "string"},
-        "failureCode": {"type": "string"}
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ledgerVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "batchId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "group": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "enum": [
+            "screenshot",
+            "link",
+            "video",
+            "text",
+            "saved_html"
+          ]
+        },
+        "status": {
+          "enum": [
+            "captured",
+            "failed",
+            "superseded"
+          ]
+        },
+        "destinationKey": {
+          "type": "string",
+          "minLength": 1
+        },
+        "destination": {
+          "type": "string"
+        },
+        "submittedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "submittedUrl": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https?://"
+        },
+        "platform": {
+          "enum": [
+            "generic_web",
+            "xiaohongshu",
+            "ctrip",
+            "wechat_official",
+            "mafengwo",
+            "douyin",
+            "tiktok",
+            "instagram",
+            "youtube"
+          ]
+        },
+        "platformItemId": {
+          "type": "string"
+        },
+        "platformAccess": {
+          "$ref": "#/$defs/platformAccess"
+        },
+        "sourcePolicy": {
+          "$ref": "#/$defs/sourcePolicy"
+        },
+        "mediaIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "evidence": {
+          "type": "object"
+        },
+        "failureReason": {
+          "type": "string"
+        },
+        "failureCode": {
+          "type": "string"
+        }
       },
       "allOf": [
         {
-          "if": {"properties": {"type": {"const": "link"}}, "required": ["type"]},
-          "then": {"required": ["submittedUrl"]}
+          "if": {
+            "properties": {
+              "type": {
+                "const": "link"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "submittedUrl"
+            ]
+          }
         }
       ],
       "additionalProperties": false
     },
     "media": {
       "type": "object",
-      "required": ["id", "sourceId", "kind", "role", "path", "sha256", "immutableOriginal", "createdAt"],
+      "required": [
+        "id",
+        "sourceId",
+        "kind",
+        "role",
+        "path",
+        "sha256",
+        "immutableOriginal",
+        "createdAt"
+      ],
       "properties": {
-        "id": {"type": "string", "minLength": 1},
-        "sourceId": {"type": "string", "minLength": 1},
-        "kind": {"enum": ["image", "video"]},
-        "role": {"enum": ["original", "display_crop", "evidence_frame"]},
-        "path": {"type": "string", "minLength": 1},
-        "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
-        "immutableOriginal": {"type": "boolean"},
-        "mimeType": {"type": "string"},
-        "derivedFromMediaId": {"type": "string"},
-        "displayPhotoScore": {"type": "number", "minimum": 0, "maximum": 1},
-        "displayPhotoEligible": {"type": "boolean"},
-        "crop": {"type": "object"},
-        "createdAt": {"$ref": "#/$defs/timestamp"}
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sourceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "image",
+            "video"
+          ]
+        },
+        "role": {
+          "enum": [
+            "original",
+            "display_crop",
+            "evidence_frame"
+          ]
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "immutableOriginal": {
+          "type": "boolean"
+        },
+        "mimeType": {
+          "type": "string"
+        },
+        "derivedFromMediaId": {
+          "type": "string"
+        },
+        "displayPhotoScore": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "displayPhotoEligible": {
+          "type": "boolean"
+        },
+        "crop": {
+          "type": "object"
+        },
+        "createdAt": {
+          "$ref": "#/$defs/timestamp"
+        }
+      },
+      "additionalProperties": false
+    },
+    "routeStop": {
+      "type": "object",
+      "required": [
+        "placeId",
+        "timeBlock"
+      ],
+      "properties": {
+        "placeId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "timeBlock": {
+          "enum": [
+            "morning",
+            "midday",
+            "afternoon",
+            "evening",
+            "flexible"
+          ]
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 500
+        }
+      },
+      "additionalProperties": false
+    },
+    "routeConnection": {
+      "type": "object",
+      "required": [
+        "fromPlaceId",
+        "toPlaceId",
+        "mode",
+        "status"
+      ],
+      "properties": {
+        "fromPlaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "toPlaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mode": {
+          "enum": [
+            "walk",
+            "transit",
+            "rail",
+            "boat",
+            "taxi",
+            "drive",
+            "flexible"
+          ]
+        },
+        "durationText": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "status": {
+          "enum": [
+            "unverified",
+            "verified",
+            "conflict",
+            "not_found",
+            "stale"
+          ]
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 300
+        }
+      },
+      "additionalProperties": false
+    },
+    "routeDay": {
+      "type": "object",
+      "required": [
+        "day",
+        "title",
+        "stops",
+        "connections"
+      ],
+      "properties": {
+        "day": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "stops": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/routeStop"
+          }
+        },
+        "connections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/routeConnection"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "routeTripProfile": {
+      "type": "object",
+      "required": [
+        "days"
+      ],
+      "properties": {
+        "days": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30
+        },
+        "startDate": {
+          "type": "string",
+          "format": "date"
+        },
+        "partySize": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 99
+        },
+        "mobilityNotes": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "walkingLimit": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "mustGoPlaceIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "dietaryRestrictions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "hotelArea": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "pace": {
+          "type": "string",
+          "maxLength": 120
+        }
+      },
+      "additionalProperties": false
+    },
+    "routePlan": {
+      "type": "object",
+      "required": [
+        "id",
+        "destinationKey",
+        "locale",
+        "title",
+        "status",
+        "generationMode",
+        "humanReviewStatus",
+        "mapStyle",
+        "tripProfile",
+        "days",
+        "unassigned",
+        "assumptions",
+        "cannotProve",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "destinationKey": {
+          "type": "string",
+          "minLength": 1
+        },
+        "locale": {
+          "enum": [
+            "zh-CN",
+            "en-US"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 180
+        },
+        "status": {
+          "enum": [
+            "active",
+            "archived"
+          ]
+        },
+        "generationMode": {
+          "const": "ai_assisted"
+        },
+        "humanReviewStatus": {
+          "enum": [
+            "not_reviewed",
+            "human_reviewed"
+          ]
+        },
+        "mapStyle": {
+          "const": "schematic"
+        },
+        "tripProfile": {
+          "$ref": "#/$defs/routeTripProfile"
+        },
+        "days": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/routeDay"
+          },
+          "minItems": 1,
+          "maxItems": 30
+        },
+        "unassigned": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "placeId"
+            ],
+            "properties": {
+              "placeId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "reason": {
+                "type": "string",
+                "maxLength": 300
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "assumptions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "cannotProve": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "createdAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/timestamp"
+        }
       },
       "additionalProperties": false
     },
     "verificationSnapshot": {
       "type": "object",
-      "required": ["id", "destinationKey", "trigger", "checkedAt", "sourcePolicyVersion", "items", "tripRisks", "changes"],
-      "properties": {
-        "id": {"type": "string", "minLength": 1},
-        "destinationKey": {"type": "string", "minLength": 1},
-        "trigger": {"enum": ["agreed_date_once", "pre_trip_on_demand_legacy"]},
-        "agreedReviewDate": {"type": "string", "format": "date"},
-        "agreementConfirmed": {"const": true},
-        "serviceContext": {"enum": ["manual_itinerary_beta", "standalone_non_public"]},
-        "tripRequestId": {"type": "string", "minLength": 1},
-        "legacyImported": {"type": "boolean"},
-        "checkedAt": {"$ref": "#/$defs/timestamp"},
-        "sourcePolicyVersion": {"const": "2.3.0"},
-        "items": {"type": "array", "items": {"$ref": "#/$defs/verificationItem"}},
-        "tripRisks": {"type": "array", "items": {"$ref": "#/$defs/executionRisk"}},
-        "changes": {"type": "array", "items": {"type": "object"}},
-        "summary": {"type": "string"}
-      },
-      "allOf": [
-        {
-          "if": {"properties": {"trigger": {"const": "agreed_date_once"}}, "required": ["trigger"]},
-          "then": {"required": ["agreedReviewDate", "agreementConfirmed", "serviceContext"]}
-        },
-        {
-          "if": {"properties": {"trigger": {"const": "pre_trip_on_demand_legacy"}}, "required": ["trigger"]},
-          "then": {"required": ["legacyImported"]}
-        }
+      "required": [
+        "id",
+        "destinationKey",
+        "trigger",
+        "checkedAt",
+        "sourcePolicyVersion",
+        "items",
+        "tripRisks",
+        "changes"
       ],
-      "additionalProperties": false
-    },
-    "tripRequest": {
-      "type": "object",
-      "required": ["id", "offerId", "destinationKey", "status", "createdAt", "updatedAt"],
       "properties": {
-        "id": {"type": "string", "minLength": 1},
-        "offerId": {"enum": ["pre-trip-review", "manual-itinerary-beta"]},
-        "destinationKey": {"type": "string", "minLength": 1},
-        "status": {"enum": ["draft", "submitted", "scope_schedule_confirmed", "customer_confirmed", "payment_instructions_sent", "payment_recorded", "in_delivery", "completed", "declined", "cancelled"]},
-        "startDate": {"type": "string", "format": "date"},
-        "days": {"type": "integer", "minimum": 1},
-        "placeIds": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
-        "agreedReviewDate": {"type": "string", "format": "date"},
-        "deliveryDueAt": {"$ref": "#/$defs/timestamp"},
-        "scopeConfirmedAt": {"$ref": "#/$defs/timestamp"},
-        "customerConfirmedAt": {"$ref": "#/$defs/timestamp"},
-        "paymentInstructionsSentAt": {"$ref": "#/$defs/timestamp"},
-        "paymentRecordedAt": {"$ref": "#/$defs/timestamp"},
-        "deliveryStartedAt": {"$ref": "#/$defs/timestamp"},
-        "legacyImported": {"type": "boolean"},
-        "legacyStatus": {"type": "string"},
-        "contact": {"type": "string"},
-        "notes": {"type": "string"},
-        "createdAt": {"$ref": "#/$defs/timestamp"},
-        "updatedAt": {"$ref": "#/$defs/timestamp"}
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "destinationKey": {
+          "type": "string",
+          "minLength": 1
+        },
+        "trigger": {
+          "enum": [
+            "agreed_date_once",
+            "pre_trip_on_demand_legacy"
+          ]
+        },
+        "agreedReviewDate": {
+          "type": "string",
+          "format": "date"
+        },
+        "agreementConfirmed": {
+          "const": true
+        },
+        "serviceContext": {
+          "type": "string",
+          "description": "Legacy compatibility only."
+        },
+        "tripRequestId": {
+          "type": "string",
+          "description": "Legacy compatibility only."
+        },
+        "legacyImported": {
+          "type": "boolean"
+        },
+        "checkedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sourcePolicyVersion": {
+          "const": "2.3.0"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/verificationItem"
+          }
+        },
+        "tripRisks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/executionRisk"
+          }
+        },
+        "changes": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "summary": {
+          "type": "string"
+        }
       },
       "allOf": [
         {
           "if": {
-            "allOf": [
-              {"properties": {"offerId": {"const": "manual-itinerary-beta"}}, "required": ["offerId"]},
-              {"not": {"properties": {"legacyImported": {"const": true}}, "required": ["legacyImported"]}}
+            "properties": {
+              "trigger": {
+                "const": "agreed_date_once"
+              }
+            },
+            "required": [
+              "trigger"
             ]
           },
           "then": {
-            "properties": {
-              "days": {"type": "integer", "minimum": 3, "maximum": 7},
-              "placeIds": {"type": "array", "items": {"type": "string"}, "uniqueItems": true, "minItems": 2, "maxItems": 15}
-            }
+            "required": [
+              "agreedReviewDate",
+              "agreementConfirmed"
+            ]
           }
         },
         {
-          "if": {"properties": {"offerId": {"const": "pre-trip-review"}}, "required": ["offerId"]},
-          "then": {"required": ["legacyImported"]}
-        },
-        {
-          "if": {"properties": {"status": {"enum": ["scope_schedule_confirmed", "customer_confirmed", "payment_instructions_sent", "payment_recorded", "in_delivery", "completed"]}}, "required": ["status"]},
-          "then": {"required": ["agreedReviewDate", "deliveryDueAt", "scopeConfirmedAt"]}
-        },
-        {
-          "if": {"properties": {"status": {"enum": ["customer_confirmed", "payment_instructions_sent", "payment_recorded", "in_delivery", "completed"]}}, "required": ["status"]},
-          "then": {"required": ["customerConfirmedAt"]}
-        },
-        {
-          "if": {"properties": {"status": {"enum": ["payment_instructions_sent", "payment_recorded", "in_delivery", "completed"]}}, "required": ["status"]},
-          "then": {"required": ["paymentInstructionsSentAt"]}
-        },
-        {
-          "if": {"properties": {"status": {"enum": ["payment_recorded", "in_delivery", "completed"]}}, "required": ["status"]},
-          "then": {"required": ["paymentRecordedAt"]}
-        },
-        {
-          "if": {"properties": {"status": {"enum": ["in_delivery", "completed"]}}, "required": ["status"]},
-          "then": {"required": ["deliveryStartedAt"]}
+          "if": {
+            "properties": {
+              "trigger": {
+                "const": "pre_trip_on_demand_legacy"
+              }
+            },
+            "required": [
+              "trigger"
+            ]
+          },
+          "then": {
+            "required": [
+              "legacyImported"
+            ]
+          }
         }
       ],
       "additionalProperties": false
     },
     "event": {
       "type": "object",
-      "required": ["id", "operationId", "type", "createdAt", "undoable"],
+      "required": [
+        "id",
+        "operationId",
+        "type",
+        "createdAt",
+        "undoable"
+      ],
       "properties": {
-        "id": {"type": "string"},
-        "operationId": {"type": "string"},
-        "type": {"type": "string"},
-        "entityId": {"type": "string"},
-        "createdAt": {"$ref": "#/$defs/timestamp"},
-        "undoable": {"type": "boolean"},
+        "id": {
+          "type": "string"
+        },
+        "operationId": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "entityId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "undoable": {
+          "type": "boolean"
+        },
         "before": {},
         "after": {},
-        "undoneAt": {"$ref": "#/$defs/timestamp"}
+        "undoneAt": {
+          "$ref": "#/$defs/timestamp"
+        }
       },
       "additionalProperties": false
     },
     "tombstone": {
       "type": "object",
-      "required": ["entityType", "entityId", "deletedAt", "entity"],
+      "required": [
+        "entityType",
+        "entityId",
+        "deletedAt",
+        "entity"
+      ],
       "properties": {
-        "entityType": {"const": "place"},
-        "entityId": {"type": "string"},
-        "deletedAt": {"$ref": "#/$defs/timestamp"},
-        "entity": {"$ref": "#/$defs/place"}
+        "entityType": {
+          "const": "place"
+        },
+        "entityId": {
+          "type": "string"
+        },
+        "deletedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "entity": {
+          "$ref": "#/$defs/place"
+        }
       },
       "additionalProperties": false
     },
     "ingestBatch": {
       "type": "object",
-      "required": ["id", "sourceIds", "createdAt"],
+      "required": [
+        "id",
+        "sourceIds",
+        "createdAt"
+      ],
       "properties": {
-        "id": {"type": "string"},
-        "destination": {"type": "string"},
-        "sourceIds": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
-        "createdAt": {"$ref": "#/$defs/timestamp"},
-        "passportGeneratedDestinations": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+        "id": {
+          "type": "string"
+        },
+        "destination": {
+          "type": "string"
+        },
+        "sourceIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "createdAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "passportGeneratedDestinations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        }
       },
       "additionalProperties": false
     }
   },
   "examples": [
     {
-      "schemaVersion": "2.3.0",
+      "schemaVersion": "2.4.0",
       "id": "library-demo",
       "revision": 1,
       "createdAt": "2026-08-09T00:00:00Z",
@@ -380,8 +1297,13 @@
           "key": "bangkok",
           "name": "曼谷",
           "status": "confirmed",
-          "placeIds": ["place-commons"],
-          "sourceIds": ["source-shot-commons", "source-link-commons"],
+          "placeIds": [
+            "place-commons"
+          ],
+          "sourceIds": [
+            "source-shot-commons",
+            "source-link-commons"
+          ],
           "sortOrder": 0,
           "createdAt": "2026-08-09T00:00:00Z",
           "updatedAt": "2026-08-09T00:00:00Z"
@@ -395,8 +1317,13 @@
           "name": "theCOMMONS Thonglor",
           "placeType": "business",
           "branch": "Thonglor",
-          "sourceIds": ["source-shot-commons", "source-link-commons"],
-          "mediaIds": ["media-shot-commons-original"],
+          "sourceIds": [
+            "source-shot-commons",
+            "source-link-commons"
+          ],
+          "mediaIds": [
+            "media-shot-commons-original"
+          ],
           "displayMediaId": "media-shot-commons-original",
           "sortOrder": 0,
           "createdAt": "2026-08-09T00:00:00Z",
@@ -416,11 +1343,17 @@
           "sourcePolicy": {
             "version": "2.3.0",
             "accessLevel": "local_only",
-            "canSupport": ["screenshot_content"],
-            "cannotProve": ["original_url"],
+            "canSupport": [
+              "screenshot_content"
+            ],
+            "cannotProve": [
+              "original_url"
+            ],
             "untrustedInstructionsDetected": false
           },
-          "mediaIds": ["media-shot-commons-original"]
+          "mediaIds": [
+            "media-shot-commons-original"
+          ]
         },
         {
           "id": "source-link-commons",
@@ -435,8 +1368,13 @@
           "sourcePolicy": {
             "version": "2.3.0",
             "accessLevel": "public_readable",
-            "canSupport": ["original_url", "public_page_facts"],
-            "cannotProve": ["future_opening_status"],
+            "canSupport": [
+              "original_url",
+              "public_page_facts"
+            ],
+            "cannotProve": [
+              "future_opening_status"
+            ],
             "untrustedInstructionsDetected": false
           },
           "mediaIds": []
@@ -461,17 +1399,21 @@
           "trigger": "agreed_date_once",
           "agreedReviewDate": "2026-08-09",
           "agreementConfirmed": true,
-          "serviceContext": "manual_itinerary_beta",
-          "tripRequestId": "request-demo",
           "checkedAt": "2026-08-09T00:00:00Z",
           "sourcePolicyVersion": "2.3.0",
           "items": [
             {
               "placeId": "place-commons",
               "accessLevel": "public_readable",
-              "canSupport": ["opening_hours_observed"],
-              "cannotProve": ["future_queue"],
-              "facts": {"openingHoursText": "每日 08:00–01:00"},
+              "canSupport": [
+                "opening_hours_observed"
+              ],
+              "cannotProve": [
+                "future_queue"
+              ],
+              "facts": {
+                "openingHoursText": "每日 08:00–01:00"
+              },
               "factAudits": [
                 {
                   "field": "openingHoursText",
@@ -484,7 +1426,9 @@
                       "kind": "official"
                     }
                   ],
-                  "cannotProve": ["future_queue"],
+                  "cannotProve": [
+                    "future_queue"
+                  ],
                   "nextAction": "出发当天再次确认"
                 }
               ],
@@ -498,27 +1442,61 @@
               "status": "unverified",
               "summary": "临近出发日再查官方天气预警",
               "sources": [],
-              "cannotProve": ["future_weather"],
+              "cannotProve": [
+                "future_weather"
+              ],
               "nextAction": "约定复核日查看官方预警"
             }
           ],
-          "changes": [{"placeId": "place-commons", "field": "openingHoursText", "before": "", "after": "每日 08:00–01:00"}]
+          "changes": [
+            {
+              "placeId": "place-commons",
+              "field": "openingHoursText",
+              "before": "",
+              "after": "每日 08:00–01:00"
+            }
+          ]
         }
       ],
-      "tripRequests": [
+      "tripRequests": [],
+      "routePlans": [
         {
-          "id": "request-demo",
-          "offerId": "manual-itinerary-beta",
+          "id": "route-plan-bangkok-demo",
           "destinationKey": "bangkok",
-          "status": "completed",
-          "startDate": "2026-09-01",
-          "agreedReviewDate": "2026-08-09",
-          "deliveryDueAt": "2026-08-20T09:00:00Z",
-          "scopeConfirmedAt": "2026-08-10T09:00:00Z",
-          "customerConfirmedAt": "2026-08-10T10:00:00Z",
-          "paymentInstructionsSentAt": "2026-08-10T11:00:00Z",
-          "paymentRecordedAt": "2026-08-11T09:00:00Z",
-          "deliveryStartedAt": "2026-08-11T10:00:00Z",
+          "locale": "zh-CN",
+          "title": "曼谷一日路线",
+          "status": "active",
+          "generationMode": "ai_assisted",
+          "humanReviewStatus": "not_reviewed",
+          "mapStyle": "schematic",
+          "tripProfile": {
+            "days": 1,
+            "partySize": 2,
+            "walkingLimit": "每天不超过 8 公里"
+          },
+          "days": [
+            {
+              "day": 1,
+              "title": "通罗一日",
+              "summary": "按片区集中安排，减少跨区往返。",
+              "stops": [
+                {
+                  "placeId": "place-commons",
+                  "timeBlock": "afternoon"
+                }
+              ],
+              "connections": []
+            }
+          ],
+          "unassigned": [],
+          "assumptions": [
+            "以住宿位置和公开交通信息作为编排参考"
+          ],
+          "cannotProve": [
+            "live_traffic",
+            "future_opening_status",
+            "human_review"
+          ],
           "createdAt": "2026-08-09T00:00:00Z",
           "updatedAt": "2026-08-09T00:00:00Z"
         }
@@ -529,7 +1507,10 @@
         {
           "id": "batch-demo",
           "destination": "曼谷",
-          "sourceIds": ["source-shot-commons", "source-link-commons"],
+          "sourceIds": [
+            "source-shot-commons",
+            "source-link-commons"
+          ],
           "createdAt": "2026-08-09T00:00:00Z"
         }
       ]

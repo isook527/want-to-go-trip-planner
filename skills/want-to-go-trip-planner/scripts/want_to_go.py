@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import copy
 import hashlib
+import html
 import ipaddress
 import json
 import os
@@ -21,7 +22,7 @@ import unicodedata
 import uuid
 import zipfile
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterator, Optional, Union
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -33,7 +34,7 @@ CONTRACT_PATH = Path(__file__).resolve().parent.parent / "references" / "shared-
 def load_product_config() -> dict[str, Any]:
     with CONFIG_PATH.open("r", encoding="utf-8") as handle:
         config = json.load(handle)
-    required = {"version", "contractVersion", "sourcePolicyVersion", "form", "offers", "copy", "paymentWorkflow"}
+    required = {"version", "contractVersion", "sourcePolicyVersion", "copy"}
     missing = sorted(required - set(config))
     if missing:
         raise RuntimeError(f"product config missing keys: {', '.join(missing)}")
@@ -44,16 +45,6 @@ PRODUCT_CONFIG = load_product_config()
 VERSION = str(PRODUCT_CONFIG["version"])
 CONTRACT_VERSION = str(PRODUCT_CONFIG["contractVersion"])
 SOURCE_POLICY_VERSION = str(PRODUCT_CONFIG["sourcePolicyVersion"])
-CTA_URL = str(PRODUCT_CONFIG["form"]["requestUrl"])
-PUBLIC_OFFER_ID = str(PRODUCT_CONFIG["form"]["publicOfferId"])
-REQUEST_WORKFLOW_STAGES = list(PRODUCT_CONFIG["paymentWorkflow"]["stages"])
-REQUEST_STAGE_REQUIREMENTS = {
-    "scope_schedule_confirmed": ("agreedReviewDate", "deliveryDueAt", "scopeConfirmedAt"),
-    "customer_confirmed": ("customerConfirmedAt",),
-    "payment_instructions_sent": ("paymentInstructionsSentAt",),
-    "payment_recorded": ("paymentRecordedAt",),
-    "in_delivery": ("deliveryStartedAt",),
-}
 PENDING_DESTINATION_KEY = "pending"
 DESTINATION_ALIASES = {
     "上海": "shanghai",
@@ -103,6 +94,9 @@ MISSING_FIELD_LABELS_EN = {
     "suggestedDuration": "suggested duration",
 }
 FACT_AUDIT_STATUSES = {"unverified", "verified", "conflict", "not_found", "stale"}
+ROUTE_TIME_BLOCKS = {"morning", "midday", "afternoon", "evening", "flexible"}
+ROUTE_TRANSPORT_MODES = {"walk", "transit", "rail", "boat", "taxi", "drive", "flexible"}
+ROUTE_REVIEW_STATUSES = {"not_reviewed", "human_reviewed"}
 FACT_AUDIT_PRIORITY = {
     "verified": 0,
     "unverified": 1,
@@ -180,24 +174,44 @@ SECRET_PATTERN = re.compile(
     r"(?:-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|"
     r"\b(?:sk|rk|pk)_[A-Za-z0-9]{20,}\b|"
     r"\bBearer\s+[A-Za-z0-9._~+/=-]{16,}|"
-    r"\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|cookie)\s*[:=]\s*[^\s,;]{8,})",
+    r"\b(?:xsec[_-]?token|xsec[_-]?source|auth[_-]?token|authorization|"
+    r"api[_-]?key|apikey|access[_-]?token|refresh[_-]?token|password|cookie)"
+    r"[ \t]*[:=][ \t]*[^\s,;<>'\"]{8,}|"
+    r"\b(?:signature|sig|igsh)[ \t]*[:=][ \t]*(?=[^\s,;<>'\"]{12,})"
+    r"[A-Za-z0-9._~+/=-]{12,})",
     re.IGNORECASE,
 )
 CUSTOMER_INTERNAL_PATTERN = re.compile(
-    r"(?:\.workbuddy|\.claude|/Users/|/mnt/|[A-Za-z]:[\\/](?:Users|Documents and Settings)[\\/]|"
+    r"(?:\.workbuddy|\.claude|"
     r"%USERPROFILE%|https?://(?:localhost|127\.0\.0\.1)(?::\d+)?|"
     r"sourceIds?|mediaIds?|confidenceScore|detailLookupAudit|nameSource|hostChecks|"
     r"platformAccess|platformItemId|platformEngagement|failureCode|"
     r"schemaVersion|operationId|tombstones?|promptInjection|宿主诊断)",
     re.IGNORECASE,
 )
+CUSTOMER_LOCAL_PATH_PATTERN = re.compile(
+    r"(?:"
+    r"(?<![A-Za-z0-9:])/(?:Applications|Library|System|Users|bin|dev|etc|home|lib64?|media|mnt|opt|private|proc|root|run|sbin|srv|tmp|usr|var|Volumes|workspace)/|"
+    r"(?<![A-Za-z0-9])[A-Za-z]:[\\/]|"
+    r"(?<![\\/])\\\\[^\\/\s<>:\"|?*]+[\\/][^\\/\s<>:\"|?*]+"
+    r")",
+    re.IGNORECASE,
+)
 SENSITIVE_QUERY_KEYS = {
     "xsec_token", "xsec_source", "access_token", "refresh_token", "auth_token",
-    "authorization", "api_key", "apikey", "signature", "sig",
+    "authorization", "api_key", "apikey", "signature", "sig", "igsh",
 }
+CUSTOMER_BLOCKED_HOST_SUFFIXES = (
+    ".localhost", ".local", ".lan", ".internal", ".home", ".home.arpa"
+)
 MAX_SCAN_ENTRY_BYTES = 32 * 1024 * 1024
 MAX_SCAN_TOTAL_BYTES = 128 * 1024 * 1024
 MAX_SCAN_ARCHIVE_ENTRIES = 10_000
+MAX_SCAN_COMPRESSION_RATIO = 200
+PACKAGE_ALLOWED_SUFFIXES = {
+    ".md", ".json", ".py", ".mjs", ".yaml", ".ps1", ".swift"
+}
+PACKAGE_ALLOWED_BASENAMES = {"license"}
 MAX_CUSTOMER_PHOTO_BYTES = 16 * 1024 * 1024
 RELEASE_ROOT = "want-to-go-trip-planner"
 RELEASE_MANIFEST_NAME = f"{RELEASE_ROOT}/release-manifest.json"
@@ -393,6 +407,7 @@ def empty_library() -> dict[str, Any]:
         "media": [],
         "verificationSnapshots": [],
         "tripRequests": [],
+        "routePlans": [],
         "events": [],
         "tombstones": [],
         "ingestBatches": [],
@@ -418,7 +433,7 @@ def migrate_library_data(raw: dict[str, Any]) -> tuple[dict[str, Any], list[str]
     data.pop("destinationCollections", None)
     for key in (
         "destinations", "places", "sources", "media", "verificationSnapshots",
-        "tripRequests", "events", "tombstones", "ingestBatches", "bundles",
+        "tripRequests", "routePlans", "events", "tombstones", "ingestBatches", "bundles",
     ):
         if not isinstance(data.get(key), list):
             data[key] = []
@@ -531,54 +546,6 @@ def migrate_library_data(raw: dict[str, Any]) -> tuple[dict[str, Any], list[str]
                 for risk in item.get("executionRisks") or []
                 if (normalized := normalize_execution_risk(risk, checked_default))
             ]
-    manual_limits = PRODUCT_CONFIG["offers"]["manualItineraryBeta"]["limits"]
-    current_statuses = {"draft", *REQUEST_WORKFLOW_STAGES, "declined", "cancelled"}
-    for request in data["tripRequests"]:
-        if not isinstance(request, dict):
-            continue
-        request.setdefault("id", f"trip-request-{uuid.uuid4().hex[:12]}")
-        request.setdefault("offerId", PUBLIC_OFFER_ID)
-        request.setdefault("destinationKey", destination_key(request.get("destination")))
-        request.setdefault("status", "draft")
-        request.setdefault("createdAt", now_iso())
-        request.setdefault("updatedAt", text(request.get("createdAt")) or now_iso())
-        if old_version != CONTRACT_VERSION:
-            request.setdefault("legacyImported", True)
-        if text(request.get("offerId")) == "pre-trip-review" and request.get("legacyImported") is not True:
-            request["legacyImported"] = True
-            changes.append(f"legacy_trip_request_offer:{text(request.get('id')) or 'unknown'}")
-        old_status = text(request.get("status"))
-        if old_status and old_status not in current_statuses:
-            request["legacyStatus"] = old_status
-            request["status"] = "submitted" if old_status == "accepted" else "draft"
-            request["legacyImported"] = True
-            changes.append(f"legacy_trip_request_status:{text(request.get('id')) or 'unknown'}:{old_status}")
-        if text(request.get("offerId")) == PUBLIC_OFFER_ID:
-            days = int(request.get("days", 0) or 0)
-            count = len(request.get("placeIds") or [])
-            if (
-                (days and not manual_limits["daysMin"] <= days <= manual_limits["daysMax"])
-                or (count and not manual_limits["placesMin"] <= count <= manual_limits["placesMax"])
-            ):
-                was_legacy = request.get("legacyImported") is True
-                request["legacyImported"] = True
-                if not was_legacy:
-                    changes.append(f"legacy_trip_request_scope:{text(request.get('id')) or 'unknown'}")
-        status = text(request.get("status"))
-        ordered_statuses = ["draft", *REQUEST_WORKFLOW_STAGES]
-        if status in ordered_statuses:
-            missing_stage_fields = [
-                field
-                for stage, fields in REQUEST_STAGE_REQUIREMENTS.items()
-                if ordered_statuses.index(status) >= ordered_statuses.index(stage)
-                for field in fields
-                if not text(request.get(field))
-            ]
-            if missing_stage_fields:
-                was_legacy = request.get("legacyImported") is True
-                request["legacyImported"] = True
-                if not was_legacy:
-                    changes.append(f"legacy_trip_request_stage:{text(request.get('id')) or 'unknown'}")
     source_ids_by_bundle: dict[str, dict[str, str]] = {}
     for bundle, _raw, base_id, canonical_id in canonical_source_records(data.get("bundles") or []):
         source_ids_by_bundle.setdefault(text(bundle.get("bundleId")), {})[base_id] = canonical_id
@@ -823,20 +790,40 @@ def source_links(place: dict[str, Any]) -> list[dict[str, str]]:
 
 
 def customer_safe_url(value: Any) -> str:
-    """Keep a submitted public URL while removing credential-like query fields."""
+    """Keep a public HTTPS URL while removing credential-like query fields."""
     raw = text(value)
     try:
         parsed = urlsplit(raw)
     except ValueError:
         return ""
-    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+    if parsed.scheme.lower() != "https" or not parsed.hostname:
+        return ""
+    if parsed.username or parsed.password:
+        return ""
+    try:
+        if parsed.port not in {None, 443}:
+            return ""
+    except ValueError:
+        return ""
+    hostname = parsed.hostname.casefold().rstrip(".")
+    if (
+        hostname == "localhost"
+        or hostname.endswith(CUSTOMER_BLOCKED_HOST_SUFFIXES)
+        or "." not in hostname
+    ):
+        return ""
+    try:
+        address = ipaddress.ip_address(hostname)
+    except ValueError:
+        address = None
+    if address is not None and not address.is_global:
         return ""
     query = [
         (key, item)
         for key, item in parse_qsl(parsed.query, keep_blank_values=True)
-        if key.casefold() not in SENSITIVE_QUERY_KEYS
+        if key.casefold().replace("-", "_") not in SENSITIVE_QUERY_KEYS
     ]
-    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query, doseq=True), parsed.fragment))
+    return urlunsplit(("https", parsed.netloc, parsed.path, urlencode(query, doseq=True), parsed.fragment))
 
 
 def customer_source_links(value: Any) -> list[dict[str, str]]:
@@ -1247,6 +1234,278 @@ def customer_place(
             "verificationStatus": first(place, "verificationStatus"),
         })
     return {key: value for key, value in result.items() if value not in ("", None, [])}
+
+
+def route_text_list(value: Any, field: str, maximum: int = 20) -> list[str]:
+    if value in (None, ""):
+        return []
+    if not isinstance(value, list):
+        raise ValueError(f"{field} must be an array")
+    values = merge_unique(value)
+    if len(values) > maximum:
+        raise ValueError(f"{field} has too many items")
+    return values
+
+
+def route_plan_place_ids(plan: dict[str, Any]) -> set[str]:
+    result = {
+        text(stop.get("placeId"))
+        for day in plan.get("days") or []
+        if isinstance(day, dict)
+        for stop in day.get("stops") or []
+        if isinstance(stop, dict) and text(stop.get("placeId"))
+    }
+    result.update(
+        text(item.get("placeId"))
+        for item in plan.get("unassigned") or []
+        if isinstance(item, dict) and text(item.get("placeId"))
+    )
+    return result
+
+
+def normalize_route_plan(
+    raw: Any,
+    library: dict[str, Any],
+    destination_value: str,
+    locale: str,
+) -> tuple[dict[str, Any], int]:
+    if isinstance(raw, dict) and isinstance(raw.get("routePlan"), dict):
+        raw = raw["routePlan"]
+    if not isinstance(raw, dict):
+        raise ValueError("route plan must be an object")
+    requested_key = destination_key_for_library(library, destination_value)
+    if requested_key == PENDING_DESTINATION_KEY:
+        raise ValueError("route plan destination must be confirmed")
+    destination_places = [
+        item for item in library.get("places") or []
+        if isinstance(item, dict)
+        and text(item.get("destinationKey")) == requested_key
+        and text(item.get("destinationStatus")) == "confirmed"
+    ]
+    ready_places = {
+        text(item.get("id")): item
+        for item in destination_places
+        if text(item.get("id")) and not passport_missing_fields(item)
+    }
+    if not ready_places:
+        raise ValueError("route plan needs at least one passport-ready place")
+
+    profile_raw = raw.get("tripProfile") if isinstance(raw.get("tripProfile"), dict) else {}
+    trip_days = int(profile_raw.get("days", 0) or 0)
+    if not 1 <= trip_days <= 30:
+        raise ValueError("tripProfile.days must be between 1 and 30")
+    start_date = text(profile_raw.get("startDate"))
+    if start_date and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", start_date):
+        raise ValueError("tripProfile.startDate must use YYYY-MM-DD")
+    party_size = int(profile_raw.get("partySize", 0) or 0)
+    if party_size and not 1 <= party_size <= 99:
+        raise ValueError("tripProfile.partySize must be between 1 and 99")
+    must_go_ids = route_text_list(profile_raw.get("mustGoPlaceIds"), "tripProfile.mustGoPlaceIds", 30)
+    unknown_must_go = sorted(set(must_go_ids) - set(ready_places))
+    if unknown_must_go:
+        raise ValueError("tripProfile.mustGoPlaceIds contains an unavailable place")
+    profile = {
+        "days": trip_days,
+        "startDate": start_date,
+        "partySize": party_size,
+        "mobilityNotes": text(profile_raw.get("mobilityNotes"))[:500],
+        "walkingLimit": text(profile_raw.get("walkingLimit"))[:160],
+        "mustGoPlaceIds": must_go_ids,
+        "dietaryRestrictions": route_text_list(
+            profile_raw.get("dietaryRestrictions"), "tripProfile.dietaryRestrictions", 20
+        ),
+        "hotelArea": text(profile_raw.get("hotelArea"))[:160],
+        "pace": text(profile_raw.get("pace"))[:120],
+    }
+    profile = {key: value for key, value in profile.items() if value not in ("", 0, [])}
+
+    days_raw = raw.get("days")
+    if not isinstance(days_raw, list) or len(days_raw) != trip_days:
+        raise ValueError("route plan days must match tripProfile.days")
+    normalized_days: list[dict[str, Any]] = []
+    assigned: list[str] = []
+    for expected_day, day_raw in enumerate(days_raw, 1):
+        if not isinstance(day_raw, dict) or int(day_raw.get("day", 0) or 0) != expected_day:
+            raise ValueError("route plan days must be sequential starting at 1")
+        stops_raw = day_raw.get("stops")
+        if not isinstance(stops_raw, list):
+            raise ValueError("every route day needs a stops array")
+        stops: list[dict[str, Any]] = []
+        for stop_raw in stops_raw:
+            if not isinstance(stop_raw, dict):
+                raise ValueError("route stop must be an object")
+            place_id = text(stop_raw.get("placeId"))
+            if place_id not in ready_places:
+                raise ValueError("route stop references an unavailable place")
+            time_block = text(stop_raw.get("timeBlock")) or "flexible"
+            if time_block not in ROUTE_TIME_BLOCKS:
+                raise ValueError("route stop has an invalid timeBlock")
+            assigned.append(place_id)
+            stops.append({
+                "placeId": place_id,
+                "timeBlock": time_block,
+                "note": text(stop_raw.get("note"))[:500],
+            })
+        if len(assigned) != len(set(assigned)):
+            raise ValueError("a place can appear only once across route days")
+        day_place_ids = {item["placeId"] for item in stops}
+        connections: list[dict[str, Any]] = []
+        raw_connections = day_raw.get("connections") or []
+        if not isinstance(raw_connections, list):
+            raise ValueError("route day connections must be an array")
+        for connection_raw in raw_connections:
+            if not isinstance(connection_raw, dict):
+                raise ValueError("route connection must be an object")
+            from_id = text(connection_raw.get("fromPlaceId"))
+            to_id = text(connection_raw.get("toPlaceId"))
+            if from_id not in day_place_ids or to_id not in day_place_ids or from_id == to_id:
+                raise ValueError("route connection endpoints must be different stops in the same day")
+            mode = text(connection_raw.get("mode")) or "flexible"
+            if mode not in ROUTE_TRANSPORT_MODES:
+                raise ValueError("route connection has an invalid mode")
+            status = text(connection_raw.get("status")) or "unverified"
+            if status not in FACT_AUDIT_STATUSES:
+                raise ValueError("route connection has an invalid status")
+            connections.append({
+                "fromPlaceId": from_id,
+                "toPlaceId": to_id,
+                "mode": mode,
+                "durationText": text(connection_raw.get("durationText"))[:160],
+                "status": status,
+                "note": text(connection_raw.get("note"))[:300],
+            })
+        normalized_days.append({
+            "day": expected_day,
+            "title": text(day_raw.get("title"))[:160] or f"Day {expected_day}",
+            "summary": text(day_raw.get("summary"))[:500],
+            "stops": [{key: value for key, value in item.items() if value not in ("", [])} for item in stops],
+            "connections": [
+                {key: value for key, value in item.items() if value not in ("", [])}
+                for item in connections
+            ],
+        })
+
+    unassigned_raw = raw.get("unassigned") or []
+    if not isinstance(unassigned_raw, list):
+        raise ValueError("route plan unassigned must be an array")
+    unassigned: list[dict[str, str]] = []
+    for item in unassigned_raw:
+        if not isinstance(item, dict):
+            raise ValueError("unassigned place must be an object")
+        place_id = text(item.get("placeId"))
+        if place_id not in ready_places:
+            raise ValueError("unassigned references an unavailable place")
+        unassigned.append({"placeId": place_id, "reason": text(item.get("reason"))[:300]})
+    unassigned_ids = [item["placeId"] for item in unassigned]
+    if len(unassigned_ids) != len(set(unassigned_ids)) or set(unassigned_ids) & set(assigned):
+        raise ValueError("a place cannot be assigned and unassigned more than once")
+    covered = set(assigned) | set(unassigned_ids)
+    if covered != set(ready_places):
+        raise ValueError("route plan must assign or explicitly leave out every passport-ready place")
+    missing_must_go = sorted(set(must_go_ids) - set(assigned))
+    if missing_must_go:
+        raise ValueError("every must-go place must appear in the route")
+
+    created_at = text(raw.get("createdAt")) or now_iso()
+    plan = {
+        "id": text(raw.get("id")) or f"route-plan-{uuid.uuid4().hex[:12]}",
+        "destinationKey": requested_key,
+        "locale": "en-US" if locale.startswith("en") else "zh-CN",
+        "title": text(raw.get("title"))[:180] or f"{destination_label(requested_key, destination_value)} · {trip_days} days",
+        "status": "active",
+        "generationMode": "ai_assisted",
+        "humanReviewStatus": "not_reviewed",
+        "mapStyle": "schematic",
+        "tripProfile": profile,
+        "days": normalized_days,
+        "unassigned": [
+            {key: value for key, value in item.items() if value not in ("", [])}
+            for item in unassigned
+        ],
+        "assumptions": route_text_list(raw.get("assumptions"), "assumptions", 30),
+        "cannotProve": merge_unique([
+            *route_text_list(raw.get("cannotProve"), "cannotProve", 30),
+            "live_traffic",
+            "future_opening_status",
+            "human_review",
+        ]),
+        "createdAt": created_at,
+        "updatedAt": now_iso(),
+    }
+    excluded = len(destination_places) - len(ready_places)
+    return plan, excluded
+
+
+def customer_route_plan(plan: dict[str, Any], places: list[dict[str, Any]], locale: str) -> dict[str, Any]:
+    en = locale.startswith("en")
+    by_id = {text(item.get("id")): item for item in places if isinstance(item, dict)}
+    time_labels = {
+        "zh-CN": {"morning": "上午", "midday": "中午", "afternoon": "下午", "evening": "晚上", "flexible": "时间灵活"},
+        "en-US": {"morning": "Morning", "midday": "Midday", "afternoon": "Afternoon", "evening": "Evening", "flexible": "Flexible"},
+    }
+    mode_labels = {
+        "zh-CN": {"walk": "步行", "transit": "公共交通", "rail": "轨道交通", "boat": "船", "taxi": "出租车/网约车", "drive": "驾车", "flexible": "按现场选择"},
+        "en-US": {"walk": "Walk", "transit": "Public transit", "rail": "Rail", "boat": "Boat", "taxi": "Taxi/ride-hailing", "drive": "Drive", "flexible": "Choose on the day"},
+    }
+    key = "en-US" if en else "zh-CN"
+    days: list[dict[str, Any]] = []
+    for day in plan.get("days") or []:
+        stops = []
+        for stop in day.get("stops") or []:
+            place = by_id.get(text(stop.get("placeId")), {})
+            stops.append({
+                "name": verified_name(place) or first(place, "name"),
+                "address": first(place, "address", "addressText", "positionText"),
+                "timeLabel": time_labels[key].get(text(stop.get("timeBlock")), time_labels[key]["flexible"]),
+                "note": text(stop.get("note")),
+            })
+        connections = []
+        for connection in day.get("connections") or []:
+            from_place = by_id.get(text(connection.get("fromPlaceId")), {})
+            to_place = by_id.get(text(connection.get("toPlaceId")), {})
+            connections.append({
+                "from": verified_name(from_place) or first(from_place, "name"),
+                "to": verified_name(to_place) or first(to_place, "name"),
+                "modeLabel": mode_labels[key].get(text(connection.get("mode")), mode_labels[key]["flexible"]),
+                "durationText": text(connection.get("durationText")),
+                "statusLabel": FACT_STATUS_LABELS_EN.get(text(connection.get("status")), "Not manually reviewed") if en else FACT_STATUS_LABELS_ZH.get(text(connection.get("status")), "尚未人工复核"),
+                "note": text(connection.get("note")),
+            })
+        days.append({
+            "day": int(day.get("day", 0) or 0),
+            "title": text(day.get("title")),
+            "summary": text(day.get("summary")),
+            "stops": stops,
+            "connections": connections,
+        })
+    profile = copy.deepcopy(plan.get("tripProfile") or {})
+    profile["mustGoPlaces"] = [
+        verified_name(by_id.get(place_id, {})) or first(by_id.get(place_id, {}), "name")
+        for place_id in profile.pop("mustGoPlaceIds", [])
+        if by_id.get(place_id)
+    ]
+    unassigned = [
+        {
+            "name": verified_name(by_id.get(text(item.get("placeId")), {})) or first(by_id.get(text(item.get("placeId")), {}), "name"),
+            "reason": text(item.get("reason")),
+        }
+        for item in plan.get("unassigned") or []
+        if by_id.get(text(item.get("placeId")))
+    ]
+    return {
+        "title": text(plan.get("title")),
+        "generationLabel": "Arranged from your saved places" if en else "按收藏与偏好整理",
+        "mapLabel": "Schematic route map · no live traffic" if en else "示意路线图 · 不含实时交通",
+        "tripProfile": {key: value for key, value in profile.items() if value not in ("", None, [])},
+        "days": days,
+        "unassigned": unassigned,
+        "assumptions": merge_unique(plan.get("assumptions") or []),
+        "boundary": (
+            "The route is arranged from saved places, trip preferences and information available in this run. Recheck live traffic, future opening hours and reservations before departure."
+            if en else
+            "路线根据已保存地点、行程偏好和本轮可查信息整理；实时交通、未来营业和预约情况请在出发前再次确认。"
+        ),
+    }
 
 
 def bundle_evidence(bundle: dict[str, Any]) -> list[dict[str, Any]]:
@@ -2114,6 +2373,61 @@ def command_promote(args: argparse.Namespace) -> None:
     print(json.dumps({"status": "promoted", "placeIds": promoted}, ensure_ascii=False))
 
 
+def command_route_plan(args: argparse.Namespace) -> None:
+    locale = text(getattr(args, "locale", "zh-CN")) or "zh-CN"
+    raw = read_json(args.plan)
+    with library_transaction(args.library) as library:
+        requested_key = destination_key_for_library(library, args.destination)
+        digest = hashlib.sha256(
+            json.dumps(raw, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        ).hexdigest()[:12]
+        operation_id = get_operation_id(args, f"route-plan:{requested_key}:{digest}")
+        existing_event = find_event_by_operation(
+            library, operation_id, "route_plan.save", requested_key
+        )
+        if existing_event:
+            prior = existing_event.get("after") if isinstance(existing_event.get("after"), list) else []
+            active = next((item for item in prior if item.get("status") == "active"), {})
+            print(json.dumps({
+                "status": "already_applied",
+                "routePlanId": active.get("id", ""),
+                "destinationKey": requested_key,
+            }, ensure_ascii=False))
+            return
+        plan, excluded = normalize_route_plan(raw, library, args.destination, locale)
+        before = [
+            copy.deepcopy(item) for item in library.get("routePlans") or []
+            if isinstance(item, dict) and text(item.get("destinationKey")) == requested_key
+        ]
+        for item in library.get("routePlans") or []:
+            if isinstance(item, dict) and text(item.get("destinationKey")) == requested_key:
+                item["status"] = "archived"
+                item["updatedAt"] = now_iso()
+        library["routePlans"] = [
+            item for item in library.get("routePlans") or []
+            if not (isinstance(item, dict) and text(item.get("id")) == text(plan.get("id")))
+        ]
+        library["routePlans"].append(plan)
+        after = [
+            copy.deepcopy(item) for item in library.get("routePlans") or []
+            if isinstance(item, dict) and text(item.get("destinationKey")) == requested_key
+        ]
+        append_event(
+            library, operation_id, "route_plan.save", requested_key,
+            before=before, after=after, undoable=True,
+        )
+    assigned = sum(len(day.get("stops") or []) for day in plan.get("days") or [])
+    print(json.dumps({
+        "status": "route_ready",
+        "routePlanId": plan["id"],
+        "destinationKey": plan["destinationKey"],
+        "days": len(plan["days"]),
+        "assigned": assigned,
+        "unassigned": len(plan.get("unassigned") or []),
+        "excludedIncompleteClues": excluded,
+    }, ensure_ascii=False))
+
+
 def command_passport(args: argparse.Namespace) -> None:
     destination = text(args.destination)
     content_depth = text(getattr(args, "content_depth", "standard")) or "standard"
@@ -2146,6 +2460,21 @@ def command_passport(args: argparse.Namespace) -> None:
             ),
             None,
         )
+        active_route_plan = next(
+            (
+                plan for plan in reversed(library.get("routePlans") or [])
+                if isinstance(plan, dict)
+                and text(plan.get("destinationKey")) == requested_key
+                and text(plan.get("status")) == "active"
+            ),
+            None,
+        )
+        if not active_route_plan and not bool(getattr(args, "places_only", False)):
+            if args.locale.startswith("en"):
+                raise ValueError(
+                    "A complete passport needs a route plan. Ask the trip-intake questions, save the day-by-day route, then generate the passport."
+                )
+            raise ValueError("完整护照需要路线方案；请先完成行程问诊并保存逐日路线，再生成护照。")
         snapshot_items = {
             text(item.get("placeId")): item
             for item in ((latest_snapshot or {}).get("items") or [])
@@ -2195,16 +2524,11 @@ def command_passport(args: argparse.Namespace) -> None:
                 "contentDepth": content_depth,
             },
             "places": delivered,
+            "mapRegion": getattr(args, "map_region", "unknown"),
+            "placesOnly": not active_route_plan,
+            "routePlan": customer_route_plan(active_route_plan, candidates, args.locale) if active_route_plan else {},
             "tripRisks": customer_execution_risks((latest_snapshot or {}).get("tripRisks"), args.locale),
             "retainedClueCount": len(retained),
-            "offers": {
-                "free": PRODUCT_CONFIG["offers"]["free"],
-                "manualItineraryBeta": PRODUCT_CONFIG["offers"]["manualItineraryBeta"],
-            },
-            "requestForm": {
-                "method": PRODUCT_CONFIG["form"]["method"],
-                "url": CTA_URL,
-            },
         }
         stage_customer_photos(payload["places"], args.output)
         write_json(args.output, payload)
@@ -2276,6 +2600,17 @@ def command_edit(args: argparse.Namespace) -> None:
         place = next((item for item in library["places"] if text(item.get("id")) == args.place_id), None)
         if not place:
             raise ValueError("place not found")
+        active_route = next(
+            (
+                plan for plan in library.get("routePlans") or []
+                if isinstance(plan, dict)
+                and text(plan.get("status")) == "active"
+                and args.place_id in route_plan_place_ids(plan)
+            ),
+            None,
+        )
+        if active_route:
+            raise ValueError("place is used by the active route; save a revised route before deleting it")
         if text(patch.get("displayMediaId")):
             allowed_media = set(place.get("mediaIds") or [])
             if text(patch["displayMediaId"]) not in allowed_media:
@@ -2302,6 +2637,13 @@ def command_delete(args: argparse.Namespace) -> None:
         place = next((item for item in library["places"] if text(item.get("id")) == args.place_id), None)
         if not place:
             raise ValueError("place not found")
+        if any(
+            isinstance(plan, dict)
+            and text(plan.get("status")) == "active"
+            and args.place_id in route_plan_place_ids(plan)
+            for plan in library.get("routePlans") or []
+        ):
+            raise ValueError("place is used by an active route plan; save a revised route before deleting it")
         library["places"] = [item for item in library["places"] if text(item.get("id")) != args.place_id]
         tombstone = {
             "entityType": "place",
@@ -2435,6 +2777,13 @@ def command_undo(args: argparse.Namespace) -> None:
                 place_id = text(place.get("id"))
                 if place_id in before:
                     place["sortOrder"] = int(before[place_id])
+        elif event_type == "route_plan.save":
+            before = event.get("before") if isinstance(event.get("before"), list) else []
+            library["routePlans"] = [
+                item for item in library.get("routePlans") or []
+                if not (isinstance(item, dict) and text(item.get("destinationKey")) == entity_id)
+            ]
+            library["routePlans"].extend(copy.deepcopy(before))
         else:
             raise ValueError("event type cannot be undone")
         event["undoneAt"] = now_iso()
@@ -2561,6 +2910,20 @@ def command_repair(args: argparse.Namespace) -> int:
     return 1 if blockers else 0
 
 
+def valid_contract_uri(value: str) -> bool:
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        return False
+    scheme = parsed.scheme.casefold()
+    if scheme not in {"http", "https"} or not parsed.hostname:
+        return False
+    if parsed.username or parsed.password:
+        return False
+    return port in {None, 80 if scheme == "http" else 443}
+
+
 def json_schema_issues(
     value: Any,
     schema: dict[str, Any],
@@ -2623,7 +2986,7 @@ def json_schema_issues(
                 datetime.fromisoformat(value.replace("Z", "+00:00"))
             except ValueError:
                 issues.append(f"schema_datetime:{path}")
-        if schema.get("format") == "uri" and not re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", value):
+        if schema.get("format") == "uri" and not valid_contract_uri(value):
             issues.append(f"schema_uri:{path}")
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         if schema.get("minimum") is not None and value < schema["minimum"]:
@@ -2672,7 +3035,7 @@ def validate_library_contract(library: dict[str, Any]) -> list[str]:
     ids_by_kind: dict[str, set[str]] = {}
     for kind in (
         "destinations", "places", "sources", "media", "verificationSnapshots",
-        "tripRequests", "events",
+        "routePlans", "events",
     ):
         values = library.get(kind)
         if not isinstance(values, list):
@@ -2687,6 +3050,34 @@ def validate_library_contract(library: dict[str, Any]) -> list[str]:
     source_ids = ids_by_kind.get("sources", set())
     media_ids = ids_by_kind.get("media", set())
     place_ids = ids_by_kind.get("places", set())
+    for plan in library.get("routePlans") or []:
+        if not isinstance(plan, dict):
+            issues.append("invalid_route_plan")
+            continue
+        plan_id = text(plan.get("id"))
+        referenced = route_plan_place_ids(plan)
+        for place_id in referenced:
+            if place_id not in place_ids:
+                issues.append(f"dangling_route_plan_place:{plan_id}:{place_id}")
+        assigned = [
+            text(stop.get("placeId"))
+            for day in plan.get("days") or []
+            if isinstance(day, dict)
+            for stop in day.get("stops") or []
+            if isinstance(stop, dict)
+        ]
+        unassigned = [
+            text(item.get("placeId"))
+            for item in plan.get("unassigned") or []
+            if isinstance(item, dict)
+        ]
+        combined = [item for item in [*assigned, *unassigned] if item]
+        if len(combined) != len(set(combined)):
+            issues.append(f"duplicate_route_plan_place:{plan_id}")
+        if text(plan.get("generationMode")) != "ai_assisted":
+            issues.append(f"invalid_route_generation_mode:{plan_id}")
+        if text(plan.get("humanReviewStatus")) not in ROUTE_REVIEW_STATUSES:
+            issues.append(f"invalid_route_review_status:{plan_id}")
     for place in library.get("places") or []:
         if not isinstance(place, dict):
             issues.append("invalid_place")
@@ -2709,41 +3100,6 @@ def validate_library_contract(library: dict[str, Any]) -> list[str]:
     for media_item in library.get("media") or []:
         if isinstance(media_item, dict) and text(media_item.get("sourceId")) not in source_ids:
             issues.append(f"dangling_media_source:{media_item.get('id')}")
-    for request in library.get("tripRequests") or []:
-        if not isinstance(request, dict):
-            issues.append("invalid_trip_request")
-            continue
-        request_id = text(request.get("id"))
-        offer_id = text(request.get("offerId"))
-        if offer_id not in {"pre-trip-review", PUBLIC_OFFER_ID}:
-            issues.append(f"invalid_trip_request_offer:{request_id}")
-        if offer_id == "pre-trip-review" and request.get("legacyImported") is not True:
-            issues.append(f"public_standalone_review_request:{request_id}")
-        allowed_statuses = {"draft", *REQUEST_WORKFLOW_STAGES, "declined", "cancelled"}
-        request_status = text(request.get("status"))
-        if request_status not in allowed_statuses:
-            issues.append(f"invalid_trip_request_status:{request_id}")
-        if offer_id == PUBLIC_OFFER_ID and request.get("legacyImported") is not True:
-            limits = PRODUCT_CONFIG["offers"]["manualItineraryBeta"]["limits"]
-            if request.get("days") not in (None, ""):
-                days = int(request.get("days", 0) or 0)
-                if not limits["daysMin"] <= days <= limits["daysMax"]:
-                    issues.append(f"invalid_trip_request_days:{request_id}")
-            if request.get("placeIds"):
-                count = len(request.get("placeIds") or [])
-                if not limits["placesMin"] <= count <= limits["placesMax"]:
-                    issues.append(f"invalid_trip_request_places:{request_id}")
-        ordered_statuses = ["draft", *REQUEST_WORKFLOW_STAGES]
-        if request.get("legacyImported") is not True and request_status in ordered_statuses:
-            for stage, fields in REQUEST_STAGE_REQUIREMENTS.items():
-                if ordered_statuses.index(request_status) >= ordered_statuses.index(stage):
-                    for field in fields:
-                        if not text(request.get(field)):
-                            issues.append(f"missing_trip_request_stage_field:{request_id}:{field}")
-        for place_id in request.get("placeIds") or []:
-            if text(place_id) not in place_ids:
-                issues.append(f"dangling_trip_request_place:{request.get('id')}:{place_id}")
-    trip_request_ids = ids_by_kind.get("tripRequests", set())
     for snapshot in library.get("verificationSnapshots") or []:
         if not isinstance(snapshot, dict):
             issues.append("invalid_verification_snapshot")
@@ -2760,12 +3116,6 @@ def validate_library_contract(library: dict[str, Any]) -> list[str]:
                 issues.append(f"missing_agreed_review_date:{snapshot_id}")
             if snapshot.get("agreementConfirmed") is not True:
                 issues.append(f"review_agreement_not_confirmed:{snapshot_id}")
-            service_context = text(snapshot.get("serviceContext"))
-            if service_context not in {"manual_itinerary_beta", "standalone_non_public"}:
-                issues.append(f"invalid_review_service_context:{snapshot_id}")
-            request_id = text(snapshot.get("tripRequestId"))
-            if service_context == "manual_itinerary_beta" and request_id not in trip_request_ids:
-                issues.append(f"dangling_review_trip_request:{snapshot_id}:{request_id}")
     return sorted(set(issues))
 
 
@@ -2803,18 +3153,14 @@ def command_review(args: argparse.Namespace) -> None:
     agreed_review_date = text(raw.get("agreedReviewDate"))
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", agreed_review_date):
         raise ValueError("checks need agreedReviewDate in YYYY-MM-DD format")
+    date.fromisoformat(agreed_review_date)
     if raw.get("agreementConfirmed") is not True:
         raise ValueError("checks need agreementConfirmed: true")
-    service_context = text(raw.get("serviceContext"))
-    if service_context not in {"manual_itinerary_beta", "standalone_non_public"}:
-        raise ValueError("checks need a supported non-monitoring serviceContext")
-    trip_request_id = text(raw.get("tripRequestId"))
-    if service_context == "manual_itinerary_beta" and not trip_request_id:
-        raise ValueError("manual itinerary review needs tripRequestId")
     checked_at = text(raw.get("checkedAt"))
     if not checked_at:
         raise ValueError("checks need checkedAt for the agreed review date")
-    if checked_at[:10] != agreed_review_date:
+    parsed_check = datetime.fromisoformat(checked_at.replace("Z", "+00:00"))
+    if parsed_check.tzinfo is None or parsed_check.date().isoformat() != agreed_review_date:
         raise ValueError("checkedAt must be on agreedReviewDate")
     items = raw.get("items")
     if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
@@ -2867,19 +3213,15 @@ def command_review(args: argparse.Namespace) -> None:
         raise ValueError("tripRisks only accepts trip-scoped risks")
     snapshot: dict[str, Any] = {}
     with library_transaction(args.library) as library:
-        if service_context == "manual_itinerary_beta":
-            request = next(
-                (item for item in library["tripRequests"] if text(item.get("id")) == trip_request_id),
-                None,
-            )
-            if not request or text(request.get("offerId")) != PUBLIC_OFFER_ID:
-                raise ValueError("tripRequestId must reference the manual itinerary beta")
-            if text(request.get("destinationKey")) != requested_key:
-                raise ValueError("tripRequestId belongs to another destination")
-            if text(request.get("status")) not in {"payment_recorded", "in_delivery", "completed"}:
-                raise ValueError("the manual service must reach payment_recorded before review")
-            if any(text(item.get("tripRequestId")) == trip_request_id for item in library["verificationSnapshots"]):
-                raise ValueError("the included agreed-date review has already been recorded")
+        previous_same_date = next(
+            (item for item in library["verificationSnapshots"]
+             if text(item.get("destinationKey")) == requested_key
+             and text(item.get("agreedReviewDate")) == agreed_review_date
+             and item.get("trigger") == "agreed_date_once"),
+            None,
+        )
+        if previous_same_date:
+            raise ValueError("A review already exists for this destination and date")
         valid_place_ids = {
             text(place.get("id")) for place in library["places"]
             if text(place.get("destinationKey")) == requested_key
@@ -2901,7 +3243,6 @@ def command_review(args: argparse.Namespace) -> None:
             "trigger": "agreed_date_once",
             "agreedReviewDate": agreed_review_date,
             "agreementConfirmed": True,
-            "serviceContext": service_context,
             "checkedAt": checked_at,
             "sourcePolicyVersion": SOURCE_POLICY_VERSION,
             "items": copy.deepcopy(items),
@@ -2909,8 +3250,6 @@ def command_review(args: argparse.Namespace) -> None:
             "changes": changes,
             "summary": text(raw.get("summary")),
         }
-        if trip_request_id:
-            snapshot["tripRequestId"] = trip_request_id
         library["verificationSnapshots"].append(snapshot)
         append_event(
             library,
@@ -2924,94 +3263,16 @@ def command_review(args: argparse.Namespace) -> None:
     print(json.dumps({"status": "reviewed", "snapshotId": snapshot["id"], "changes": snapshot["changes"]}, ensure_ascii=False, indent=2))
 
 
-def command_trip_request(args: argparse.Namespace) -> None:
-    request = read_json(args.request)
-    if not isinstance(request, dict):
-        raise ValueError("trip request must be an object")
-    offer_id = text(request.get("offerId"))
-    if offer_id != PUBLIC_OFFER_ID:
-        raise ValueError("standalone pre-trip review is not a public request option")
-    place_ids = merge_unique(request.get("placeIds") or [])
-    destination = text(request.get("destination"))
-    destination_key_value = text(request.get("destinationKey")) or destination_key_for_library(
-        load_library(args.library), destination,
-    )
-    limits = PRODUCT_CONFIG["offers"]["manualItineraryBeta"]["limits"]
-    days = int(request.get("days", 0) or 0)
-    if not limits["daysMin"] <= days <= limits["daysMax"]:
-        raise ValueError(
-            f"manual itinerary beta requires {limits['daysMin']}–{limits['daysMax']} days"
-        )
-    if not limits["placesMin"] <= len(place_ids) <= limits["placesMax"]:
-        raise ValueError(
-            f"manual itinerary beta requires {limits['placesMin']}–{limits['placesMax']} places"
-        )
-    status = text(request.get("status")) or "draft"
-    allowed_statuses = {"draft", *REQUEST_WORKFLOW_STAGES, "declined", "cancelled"}
-    if status not in allowed_statuses:
-        raise ValueError("unsupported trip request status")
-    entity = {
-        "id": text(request.get("id")) or f"trip-request-{uuid.uuid4().hex[:12]}",
-        "offerId": offer_id,
-        "destinationKey": destination_key_value,
-        "status": status,
-        "createdAt": text(request.get("createdAt")) or now_iso(),
-        "updatedAt": now_iso(),
-    }
-    for key in (
-        "startDate", "days", "agreedReviewDate", "deliveryDueAt", "scopeConfirmedAt",
-        "customerConfirmedAt", "paymentInstructionsSentAt", "paymentRecordedAt",
-        "deliveryStartedAt", "contact", "notes",
-    ):
-        if request.get(key) not in (None, ""):
-            entity[key] = request[key]
-    if place_ids:
-        entity["placeIds"] = place_ids
-    operation_id = get_operation_id(args, f"trip-request:{entity['id']}")
-    with library_transaction(args.library) as library:
-        if find_event_by_operation(library, operation_id, "trip_request.save", entity["id"]):
-            print(json.dumps({"status": "already_applied", "tripRequestId": entity["id"]}, ensure_ascii=False))
-            return
-        if place_ids:
-            known = {text(place.get("id")) for place in library["places"] if text(place.get("destinationKey")) == destination_key_value}
-            if set(place_ids) - known:
-                raise ValueError("trip request contains unknown or cross-destination places")
-        existing = next(
-            (item for item in library["tripRequests"] if text(item.get("id")) == entity["id"]),
-            None,
-        )
-        if existing:
-            merged_entity = copy.deepcopy(existing)
-            merged_entity.update(entity)
-            merged_entity["createdAt"] = text(existing.get("createdAt")) or entity["createdAt"]
-            entity = merged_entity
-            previous_status = text(existing.get("status"))
-            if status not in {previous_status, "declined", "cancelled"}:
-                ordered = ["draft", *REQUEST_WORKFLOW_STAGES]
-                if previous_status not in ordered or status not in ordered:
-                    raise ValueError("unsupported trip request status transition")
-                if ordered.index(status) != ordered.index(previous_status) + 1:
-                    raise ValueError("trip request stages cannot be skipped or reversed")
-        elif status not in {"draft", "submitted"}:
-            raise ValueError("a new trip request must start as draft or submitted")
-        ordered = ["draft", *REQUEST_WORKFLOW_STAGES]
-        if status in ordered:
-            for stage, fields in REQUEST_STAGE_REQUIREMENTS.items():
-                if ordered.index(status) >= ordered.index(stage):
-                    missing = [field for field in fields if not text(entity.get(field))]
-                    if missing:
-                        raise ValueError(f"{stage} requires: {', '.join(missing)}")
-        library["tripRequests"] = [item for item in library["tripRequests"] if text(item.get("id")) != entity["id"]]
-        library["tripRequests"].append(entity)
-        append_event(library, operation_id, "trip_request.save", entity["id"], after={"offerId": offer_id, "status": entity["status"]})
-    print(json.dumps({"status": "saved", "tripRequestId": entity["id"], "externalPostPerformed": False}, ensure_ascii=False))
-
-
 def iter_text_payloads(path: Path) -> Iterator[tuple[str, str]]:
     allowed = {".md", ".json", ".py", ".mjs", ".js", ".html", ".yaml", ".yml", ".ps1", ".swift", ".txt"}
+
+    def is_text_payload(item_name: str) -> bool:
+        candidate = PurePosixPath(item_name.replace("\\", "/"))
+        return candidate.suffix.casefold() in allowed or candidate.name.casefold() in PACKAGE_ALLOWED_BASENAMES
+
     if path.is_dir():
         for item in sorted(path.rglob("*")):
-            if item.is_file() and not item.is_symlink() and item.suffix.lower() in allowed:
+            if item.is_file() and not item.is_symlink() and is_text_payload(item.name):
                 if item.stat().st_size > MAX_SCAN_ENTRY_BYTES:
                     raise ValueError(f"scan entry too large: {item}")
                 yield str(item), item.read_text(encoding="utf-8", errors="replace")
@@ -3036,9 +3297,9 @@ def iter_text_payloads(path: Path) -> Iterator[tuple[str, str]]:
                 total += info.file_size
                 if total > MAX_SCAN_TOTAL_BYTES:
                     raise ValueError("archive expanded content is too large")
-                if PurePosixPath(name).suffix.lower() in allowed:
+                if is_text_payload(name):
                     yield name, archive.read(info).decode("utf-8", errors="replace")
-    elif path.suffix.lower() in allowed:
+    elif is_text_payload(path.name):
         if path.stat().st_size > MAX_SCAN_ENTRY_BYTES:
             raise ValueError(f"scan entry too large: {path}")
         yield str(path), path.read_text(encoding="utf-8", errors="replace")
@@ -3066,8 +3327,53 @@ def forbidden_package_name(name: str) -> bool:
     return bool(re.search(r"\.(?:tmp|temp|lock|pem|key|p12|pfx)$", base, re.I))
 
 
+def allowed_package_file(name: str) -> bool:
+    path = PurePosixPath(name.replace("\\", "/"))
+    return path.name.casefold() in PACKAGE_ALLOWED_BASENAMES or path.suffix.casefold() in PACKAGE_ALLOWED_SUFFIXES
+
+
+def archive_limit_issues(archive: zipfile.ZipFile) -> list[dict[str, str]]:
+    issues: list[dict[str, str]] = []
+    infos = archive.infolist()
+    if len(infos) > MAX_SCAN_ARCHIVE_ENTRIES:
+        return [{"file": str(archive.filename), "type": "archive_entry_limit_exceeded"}]
+    total = 0
+    for info in infos:
+        name = info.filename.replace("\\", "/")
+        if info.is_dir():
+            continue
+        if info.file_size > MAX_SCAN_ENTRY_BYTES:
+            issues.append({"file": name, "type": "archive_entry_size_exceeded"})
+        total += info.file_size
+        if info.file_size > 1024 * 1024:
+            ratio = info.file_size / max(1, info.compress_size)
+            if ratio > MAX_SCAN_COMPRESSION_RATIO:
+                issues.append({"file": name, "type": "archive_compression_ratio_exceeded"})
+    if total > MAX_SCAN_TOTAL_BYTES:
+        issues.append({"file": str(archive.filename), "type": "archive_total_size_exceeded"})
+    return issues
+
+
+def archive_entry_sha256(archive: zipfile.ZipFile, info: zipfile.ZipInfo) -> tuple[int, str]:
+    size = 0
+    digest = hashlib.sha256()
+    with archive.open(info, "r") as handle:
+        while True:
+            chunk = handle.read(1024 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > MAX_SCAN_ENTRY_BYTES:
+                raise ValueError(f"archive entry too large: {info.filename}")
+            digest.update(chunk)
+    return size, digest.hexdigest()
+
+
 def release_manifest_issues(archive: zipfile.ZipFile) -> list[dict[str, str]]:
     issues: list[dict[str, str]] = []
+    limit_issues = archive_limit_issues(archive)
+    if limit_issues:
+        return limit_issues
     names = [info.filename.replace("\\", "/") for info in archive.infolist()]
     if len(names) != len(set(names)):
         issues.append({"file": str(archive.filename), "type": "duplicate_archive_entry"})
@@ -3120,10 +3426,11 @@ def release_manifest_issues(archive: zipfile.ZipFile) -> list[dict[str, str]]:
         archive_name = f"{RELEASE_ROOT}/{path}"
         if archive_name not in names:
             continue
-        data = archive.read(archive_name)
-        if item.get("size") != len(data):
+        info = archive.getinfo(archive_name)
+        size, digest = archive_entry_sha256(archive, info)
+        if item.get("size") != size:
             issues.append({"file": path, "type": "release_manifest_size_mismatch"})
-        if text(item.get("sha256")) != hashlib.sha256(data).hexdigest():
+        if text(item.get("sha256")) != digest:
             issues.append({"file": path, "type": "release_manifest_hash_mismatch"})
     return issues
 
@@ -3135,12 +3442,25 @@ def customer_url_issues(content: str) -> list[str]:
         if re.match(r"^data:image/(?:png|jpeg|webp);base64,", value, re.I):
             continue
         parsed = urlsplit(value)
-        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        if parsed.scheme != "https" or not parsed.hostname:
             issues.append("unsafe_url_protocol")
             continue
         hostname = parsed.hostname.casefold()
-        if hostname == "localhost":
+        if (
+            hostname == "localhost"
+            or hostname.endswith(CUSTOMER_BLOCKED_HOST_SUFFIXES)
+            or "." not in hostname
+            or parsed.username
+            or parsed.password
+        ):
             issues.append("unsafe_url_host")
+            continue
+        try:
+            if parsed.port not in {None, 443}:
+                issues.append("unsafe_url_port")
+                continue
+        except ValueError:
+            issues.append("unsafe_url_port")
             continue
         try:
             address = ipaddress.ip_address(hostname)
@@ -3148,7 +3468,7 @@ def customer_url_issues(content: str) -> list[str]:
             address = None
         if address and not address.is_global:
             issues.append("unsafe_url_host")
-        if any(key.casefold() in SENSITIVE_QUERY_KEYS for key, _item in parse_qsl(parsed.query, keep_blank_values=True)):
+        if any(key.casefold().replace("-", "_") in SENSITIVE_QUERY_KEYS for key, _item in parse_qsl(parsed.query, keep_blank_values=True)):
             issues.append("sensitive_url_query")
     return sorted(set(issues))
 
@@ -3168,6 +3488,46 @@ def customer_text_for_scan(content: str) -> str:
     return re.sub(r"https?://[^\s\"'<>]+", "[customer-url]", without_attributes, flags=re.I)
 
 
+def decode_html_entities(value: str) -> str:
+    decoded = value
+    for _pass in range(3):
+        updated = html.unescape(decoded)
+        if updated == decoded:
+            break
+        decoded = updated
+    return decoded
+
+
+def normalize_credential_whitespace(value: str) -> str:
+    """Normalize credential delimiters separated by a bounded amount of whitespace."""
+    keys = (
+        r"xsec[_-]?token|xsec[_-]?source|auth[_-]?token|authorization|"
+        r"api[_-]?key|apikey|access[_-]?token|refresh[_-]?token|password|cookie|"
+        r"signature|sig|igsh"
+    )
+    same_line = re.sub(
+        rf"\b({keys})[ \t]{{0,4}}([:=])[ \t]{{0,4}}",
+        lambda match: f"{match.group(1)}{match.group(2)}",
+        value,
+        flags=re.IGNORECASE,
+    )
+    def normalize_bounded_whitespace(match: re.Match[str]) -> str:
+        before, after = match.group(2), match.group(4)
+        if "\n" not in before + after and "\r" not in before + after:
+            return match.group(0)
+        if len(before) + len(after) > 8:
+            return match.group(0)
+        return f"{match.group(1)}{match.group(3)}"
+
+    return re.sub(
+        rf"\b({keys})([ \t\r\n]{{0,8}})([:=])([ \t\r\n]{{0,8}})"
+        rf"(?=[A-Za-z0-9._~+/=-]{{16,}})",
+        normalize_bounded_whitespace,
+        same_line,
+        flags=re.IGNORECASE,
+    )
+
+
 def command_scan(args: argparse.Namespace) -> None:
     target = Path(args.path)
     if not target.exists():
@@ -3180,8 +3540,11 @@ def command_scan(args: argparse.Namespace) -> None:
                 issues.append({"file": relative, "type": "forbidden_symlink"})
             if forbidden_package_name(relative):
                 issues.append({"file": relative, "type": "forbidden_artifact"})
+            if args.mode == "package" and item.is_file() and not allowed_package_file(relative):
+                issues.append({"file": relative, "type": "unsupported_package_file_type"})
     elif target.suffix.lower() == ".zip":
         with zipfile.ZipFile(target) as archive:
+            issues.extend(archive_limit_issues(archive))
             for info in archive.infolist():
                 name = info.filename.replace("\\", "/")
                 if unsafe_archive_name(name):
@@ -3190,19 +3553,21 @@ def command_scan(args: argparse.Namespace) -> None:
                     issues.append({"file": name, "type": "forbidden_symlink"})
                 if forbidden_package_name(name):
                     issues.append({"file": name, "type": "forbidden_artifact"})
+                if args.mode == "package" and not info.is_dir() and not allowed_package_file(name):
+                    issues.append({"file": name, "type": "unsupported_package_file_type"})
             if args.mode == "package":
                 issues.extend(release_manifest_issues(archive))
     for name, content in iter_text_payloads(target):
-        secret_scan_content = re.sub(
+        secret_scan_content = normalize_credential_whitespace(decode_html_entities(re.sub(
             r"data:image/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+",
             "[embedded-image]",
             content,
-        )
-        scan_content = customer_text_for_scan(content)
+        )))
+        scan_content = decode_html_entities(customer_text_for_scan(content))
         if SECRET_PATTERN.search(secret_scan_content):
             issues.append({"file": name, "type": "possible_secret"})
         if args.mode == "customer":
-            if CUSTOMER_INTERNAL_PATTERN.search(scan_content):
+            if CUSTOMER_INTERNAL_PATTERN.search(scan_content) or CUSTOMER_LOCAL_PATH_PATTERN.search(scan_content):
                 issues.append({"file": name, "type": "customer_internal_leak"})
             for issue in customer_url_issues(content):
                 issues.append({"file": name, "type": issue})
@@ -3361,6 +3726,14 @@ def build_parser() -> argparse.ArgumentParser:
     promote.add_argument("--operation-id", default="")
     promote.set_defaults(func=command_promote)
 
+    route_plan = sub.add_parser("route-plan")
+    route_plan.add_argument("--library", required=True)
+    route_plan.add_argument("--destination", required=True)
+    route_plan.add_argument("--plan", required=True)
+    route_plan.add_argument("--locale", choices=("zh-CN", "en-US", "en"), default="zh-CN")
+    route_plan.add_argument("--operation-id", default="")
+    route_plan.set_defaults(func=command_route_plan)
+
     passport = sub.add_parser("passport")
     passport.add_argument("--library", required=True)
     passport.add_argument("--destination", required=True)
@@ -3368,6 +3741,8 @@ def build_parser() -> argparse.ArgumentParser:
     passport.add_argument("--locale", choices=("zh-CN", "en-US", "en"), default="zh-CN")
     passport.add_argument("--content-depth", choices=("deep", "standard", "compact"), default="standard")
     passport.add_argument("--visitor-mode", action="store_true")
+    passport.add_argument("--places-only", action="store_true", help="Allow a place passport without a saved route")
+    passport.add_argument("--map-region", choices=("mainland", "outside_mainland", "unknown"), default="unknown")
     passport.add_argument("--operation-id", default="")
     passport.set_defaults(func=command_passport)
 
@@ -3438,12 +3813,6 @@ def build_parser() -> argparse.ArgumentParser:
     review.add_argument("--output", default="")
     review.add_argument("--operation-id", default="")
     review.set_defaults(func=command_review)
-
-    trip_request = sub.add_parser("trip-request")
-    trip_request.add_argument("--library", required=True)
-    trip_request.add_argument("--request", required=True)
-    trip_request.add_argument("--operation-id", default="")
-    trip_request.set_defaults(func=command_trip_request)
 
     scan = sub.add_parser("scan")
     scan.add_argument("--path", required=True)
