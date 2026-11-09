@@ -1,0 +1,3 @@
+# Release manifests hash exact bytes. Keep text checkouts identical on all systems.
+* text=auto eol=lf
+*.zip binary
