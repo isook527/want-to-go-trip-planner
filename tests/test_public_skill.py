@@ -3199,6 +3199,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
             with (
                 mock.patch.object(EXTRACT.sys, "platform", "win32"),
                 mock.patch.object(EXTRACT, "windows_current_user_sid", return_value="S-1-5-21-1"),
+                mock.patch.object(EXTRACT.shutil, "which", return_value="powershell.exe"),
                 mock.patch.object(EXTRACT.subprocess, "run", return_value=completed),
             ):
                 with self.assertRaisesRegex(PermissionError, "PRIVATE_PERMISSION_ENFORCEMENT_FAILED"):

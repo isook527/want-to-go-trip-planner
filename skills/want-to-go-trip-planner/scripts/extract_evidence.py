@@ -577,27 +577,22 @@ $Target = $env:WTG_ACL_TARGET
 $ExpectedSid = $env:WTG_ACL_SID
 $DirectoryFlag = $env:WTG_ACL_DIRECTORY
 $ErrorActionPreference = 'Stop'
-$acl = Get-Acl -LiteralPath $Target
-$acl.SetAccessRuleProtection($true, $false)
-foreach ($existing in @($acl.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]))) { [void]$acl.RemoveAccessRuleSpecific($existing) }
-$identity = [System.Security.Principal.SecurityIdentifier]::new($ExpectedSid)
-if ($DirectoryFlag -eq 'true') {
-  $inheritance = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
-  $propagation = [System.Security.AccessControl.PropagationFlags]::None
-  $newRule = [System.Security.AccessControl.FileSystemAccessRule]::new($identity, 'FullControl', $inheritance, $propagation, 'Allow')
-} else {
-  $newRule = [System.Security.AccessControl.FileSystemAccessRule]::new($identity, 'FullControl', 'Allow')
-}
-[void]$acl.AddAccessRule($newRule)
-Set-Acl -LiteralPath $Target -AclObject $acl
-$acl = Get-Acl -LiteralPath $Target
-$rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
-if (-not $acl.AreAccessRulesProtected -or $rules.Count -ne 1) { exit 41 }
-$rule = $rules[0]
-$ruleSid = $rule.IdentityReference.Value
-$full = [System.Security.AccessControl.FileSystemRights]::FullControl
-$hasFull = (([int]$rule.FileSystemRights -band [int]$full) -eq [int]$full)
-if ($ruleSid -ne $ExpectedSid -or $rule.AccessControlType -ne 'Allow' -or -not $hasFull) { exit 42 }
+$inheritance = if ($DirectoryFlag -eq 'true') { 'OICI' } else { '' }
+$descriptor = 'D:P(A;' + $inheritance + ';FA;;;' + $ExpectedSid + ')'
+try {
+  $acl = Get-Acl -LiteralPath $Target
+  $acl.SetSecurityDescriptorSddlForm($descriptor, [System.Security.AccessControl.AccessControlSections]::Access)
+  Set-Acl -LiteralPath $Target -AclObject $acl
+} catch { exit 43 }
+try {
+  $acl = Get-Acl -LiteralPath $Target
+  $rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
+  if (-not $acl.AreAccessRulesProtected -or $rules.Count -ne 1) { exit 41 }
+  $rule = $rules[0]
+  $full = [System.Security.AccessControl.FileSystemRights]::FullControl
+  $hasFull = (([int]$rule.FileSystemRights -band [int]$full) -eq [int]$full)
+  if ($rule.IdentityReference.Value -ne $ExpectedSid -or $rule.AccessControlType -ne 'Allow' -or -not $hasFull) { exit 42 }
+} catch { exit 44 }
 """
     command = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
     result = subprocess.run(
@@ -613,7 +608,9 @@ if ($ruleSid -ne $ExpectedSid -or $rule.AccessControlType -ne 'Allow' -or -not $
         timeout=30,
         check=False,
     )
-    return result.returncode == 0
+    if result.returncode != 0:
+        raise PermissionError(f"PRIVATE_PERMISSION_ENFORCEMENT_FAILED: WINDOWS_ACL_EXIT_{result.returncode}")
+    return True
 
 
 def restrict_path_to_current_user(path, directory=False):
@@ -621,19 +618,11 @@ def restrict_path_to_current_user(path, directory=False):
     target = Path(path)
     if sys.platform.startswith("win"):
         sid = windows_current_user_sid()
-        grant = f"*{sid}:(OI)(CI)F" if directory else f"*{sid}:F"
         try:
-            result = subprocess.run(
-                ["icacls", str(target), "/inheritance:r", "/grant:r", grant],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=30,
-                check=False,
-            )
-        except (OSError, subprocess.SubprocessError) as error:
+            if not apply_and_verify_windows_private_acl(target, sid, directory):
+                raise PermissionError("PRIVATE_PERMISSION_ENFORCEMENT_FAILED: POWERSHELL_UNAVAILABLE")
+        except subprocess.SubprocessError as error:
             raise PermissionError("PRIVATE_PERMISSION_ENFORCEMENT_FAILED") from error
-        if result.returncode != 0 or not apply_and_verify_windows_private_acl(target, sid, directory):
-            raise PermissionError("PRIVATE_PERMISSION_ENFORCEMENT_FAILED")
         return
     expected = 0o700 if directory else 0o600
     try:

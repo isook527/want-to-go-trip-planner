@@ -93,8 +93,8 @@
     },
     {
       "path": "scripts/extract_evidence.py",
-      "size": 109054,
-      "sha256": "5ebdcd92b538806aa1c5dac6cba64a494e04d2763d29560fd85a8433240b7fbf"
+      "size": 108364,
+      "sha256": "0ed11e55f0fbe1deed3c76c1fe2cc1133d3d07f867d3ce02aaf8caf77a08e6cc"
     },
     {
       "path": "scripts/library.py",
@@ -113,8 +113,8 @@
     },
     {
       "path": "scripts/prepare_display_image.py",
-      "size": 16686,
-      "sha256": "df3627966accfccf5659e92c15a1594b6e9aaf6087d7fa9186e030d230c4cc41"
+      "size": 16030,
+      "sha256": "bb7066632faa5a5d6586584dfe8c3732d29562bdf3a0c837e15b9a06a0840c05"
     },
     {
       "path": "scripts/prepare_image_macos.swift",
