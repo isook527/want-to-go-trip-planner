@@ -75,6 +75,10 @@ class BangkokFixtureTests(unittest.TestCase):
         html = self.passport("zh-CN", "areas").read_text(encoding="utf-8")
         labels = set(re.findall(r'<span class="route-name">([^<]+)</span>', html))
         self.assertEqual(labels, {"Watthana", "Phra Nakhon", "Huai Khwang", "Khlong San"})
+        stub = html.split('<aside class="hero-stub"', 1)[1].split("</aside>", 1)[0]
+        self.assertIn("行程天数</span><strong>2</strong>", stub)
+        self.assertIn("Watthana · Phra Nakhon · Huai Khwang", stub)
+        self.assertNotIn("Khlong San", stub)
         self.assertNotIn("未分片区", html)
         report_path = self.work / "areas.json"
         report = json.loads(report_path.read_text(encoding="utf-8"))
@@ -104,6 +108,7 @@ class BangkokFixtureTests(unittest.TestCase):
                 self.assertIn('class="day-activity"', rendered)
                 self.assertIn('<span>DAY 02</span></a>', rendered)
                 self.assertNotIn('aria-labelledby="manifest-title"', rendered)
+                self.assertNotIn('class="stub-detail stub-areas"', rendered)
                 self.assertNotIn("0 个片区" if locale == "zh-CN" else "0 areas", rendered)
                 self.assertEqual(rendered.count('class="card"'), 3)
                 self.assertEqual(rendered.count("www.google.com/maps/search"), 3)
@@ -121,7 +126,10 @@ class BangkokFixtureTests(unittest.TestCase):
         plan["tripProfile"]["startDate"] = "2030-05-10"
         self.route = self.work / "dated-route.json"
         self.route.write_text(json.dumps(plan), encoding="utf-8")
-        self.passport("zh-CN", "dated")
+        for locale, date_label in (("zh-CN", "行程日期"), ("en-US", "TRIP DATES")):
+            html = self.passport(locale, "dated").read_text(encoding="utf-8")
+            stub = html.split('<aside class="hero-stub"', 1)[1].split("</aside>", 1)[0]
+            self.assertRegex(stub, rf"{date_label}</span><strong>[^<]*10[^<]*11[^<]*</strong>")
         xlsx, ics = self.work / "dated.xlsx", self.work / "dated.ics"
         self.run_cli(sys.executable, SKILL / "scripts" / "export_itinerary.py",
                      self.work / "dated.json", "--xlsx", xlsx, "--ics", ics)

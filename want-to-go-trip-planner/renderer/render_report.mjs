@@ -434,6 +434,7 @@ function render(report, inputPath) {
   const baseDir = path.dirname(inputPath);
   const dayCount = Array.isArray(report.routePlan?.days) ? report.routePlan.days.length : 0;
   const dateRange = tripDateRange(report.routePlan, dayCount, locale);
+  const stubAreas = groups.slice(0, 3).map(([area]) => area).join(" · ");
   const brief = [
     dayCount ? (en ? `${dayCount} ${dayCount === 1 ? "day" : "days"}` : `${dayCount} 天`) : "",
     en ? `${places.length} ${places.length === 1 ? "place" : "places"}` : `${places.length} 个地点`,
@@ -457,7 +458,8 @@ function render(report, inputPath) {
       </div>
       <aside class="hero-stub" aria-label="${en ? "Trip document stub" : "行程票存根"}">
         <div><span class="stub-label">${en ? "DESTINATION" : "目的地"}</span><p class="stub-destination">${escapeHtml(destination)}</p></div>
-        ${dateRange ? `<div class="stub-dates"><span class="stub-label">${en ? "TRIP DATES" : "行程日期"}</span><strong>${escapeHtml(dateRange)}</strong></div>` : ""}
+        <div class="stub-detail"><span class="stub-label">${dateRange ? (en ? "TRIP DATES" : "行程日期") : (en ? "TRIP DAYS" : "行程天数")}</span><strong>${dateRange ? escapeHtml(dateRange) : dayCount || "—"}</strong></div>
+        ${stubAreas ? `<div class="stub-detail stub-areas"><span class="stub-label">${en ? "AREAS" : "片区"}</span><strong>${escapeHtml(stubAreas)}</strong></div>` : ""}
         <p class="stub-note">KORNVIA TRIP DOCUMENT</p>
       </aside>
     </header>

@@ -1,5 +1,12 @@
 # 更新记录 · Changelog
 
+## 3.2.2
+
+- 中英文 README 和仓库首页链接直达 GitHub Pages 的曼谷护照预览。
+- 桌面票根显示日期范围或行程天数，以及最多三个片区。更新曼谷示例与预览图。
+
+English: Added a live Bangkok passport preview on GitHub Pages. The desktop stub now shows trip dates or day count and up to three areas. Regenerated the example and overview image.
+
 ## 3.2.1
 
 - 对齐 Kornvia 开源仓库结构。增加中英文 README、贡献指南、私密安全报告入口、曼谷示例和六组 CI。

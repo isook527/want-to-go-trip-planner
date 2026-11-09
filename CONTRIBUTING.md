@@ -10,9 +10,9 @@ python3 -m unittest discover -s tests
 修改版本时，更新 `want-to-go-trip-planner/config/product.json` 中的 `version` 和 `passportTemplateMarker`，并更新 [CHANGELOG.md](CHANGELOG.md)。只有真正变更相应契约时才更新契约版本。若工作流中的包名包含版本，也一并更新。
 
 ```bash
-python3 want-to-go-trip-planner/scripts/build_release.py --zip dist/want-to-go-trip-planner-skill-3.2.1.zip
-python3 want-to-go-trip-planner/scripts/build_release.py --verify --zip dist/want-to-go-trip-planner-skill-3.2.1.zip
-python3 want-to-go-trip-planner/scripts/want_to_go.py scan --mode package --path dist/want-to-go-trip-planner-skill-3.2.1.zip
+python3 want-to-go-trip-planner/scripts/build_release.py --zip dist/want-to-go-trip-planner-skill-3.2.2.zip
+python3 want-to-go-trip-planner/scripts/build_release.py --verify --zip dist/want-to-go-trip-planner-skill-3.2.2.zip
+python3 want-to-go-trip-planner/scripts/want_to_go.py scan --mode package --path dist/want-to-go-trip-planner-skill-3.2.2.zip
 ```
 
 构建会重写 Skill 内的 `release-manifest.json`，并生成 ZIP 与 SHA-256 文件。提交清单，ZIP 与校验文件作为 Release 附件。提交前用 [曼谷样例](examples/bangkok/README.md) 重放护照，不提交真实收藏、截图、凭证链接或本机路径。安全问题请走 [私密报告](SECURITY.md)。

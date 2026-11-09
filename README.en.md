@@ -4,7 +4,7 @@ Turn saved travel screenshots, links and videos into a workable day-by-day trip 
 
 ![Bangkok passport overview with phone on the left and desktop on the right](docs/images/bangkok-passport-overview.png)
 
-[中文](README.md) · [Download the skill](https://github.com/isook527/want-to-go-trip-planner/releases/latest) · [View the Bangkok example](examples/bangkok/passport.html)
+[中文](README.md) · [Download the skill](https://github.com/isook527/want-to-go-trip-planner/releases/latest) · [View the Bangkok example](https://isook527.github.io/want-to-go-trip-planner/)
 
 ## From saved finds to departure
 

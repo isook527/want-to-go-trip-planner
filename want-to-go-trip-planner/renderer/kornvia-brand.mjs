@@ -40,9 +40,9 @@ border-bottom:6px solid var(--yellow);font-size:clamp(25px,3.5vw,46px);font-weig
 .hero-meta{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;width:min(72%,520px);padding-top:18px;border-top:2px solid var(--ink)}
 .hero-meta span,.stub-label{display:block;margin-bottom:5px;color:var(--muted);font-family:ui-monospace,"SFMono-Regular",Consolas,monospace;
 font-size:10px;font-weight:850;letter-spacing:.09em}.hero-meta strong{font-family:ui-monospace,"SFMono-Regular",Consolas,monospace;font-size:clamp(17px,2.2vw,25px)}
-.hero-stub{display:grid;align-content:space-between;padding:34px 26px 26px;border-top:10px solid var(--yellow);background:var(--paper)}
-.stub-destination{margin:12px 0 30px;font-size:clamp(34px,4.6vw,58px);font-weight:950;letter-spacing:-.06em;line-height:1}
-.stub-dates strong{font-size:18px;font-weight:850}.hero-summary{display:none}.stub-note{margin:26px 0 0;padding-top:18px;
+.hero-stub{display:flex;flex-direction:column;justify-content:space-between;gap:18px;min-width:0;padding:34px 26px 26px;border-top:10px solid var(--yellow);background:var(--paper);overflow-wrap:anywhere}
+.stub-destination{margin:12px 0 0;font-size:clamp(34px,4.6vw,58px);font-weight:950;letter-spacing:-.06em;line-height:1}
+.stub-detail strong{font-size:18px;font-weight:850}.stub-areas strong{font-size:15px}.hero-summary{display:none}.stub-note{margin:0;padding-top:12px;
 border-top:1px solid var(--line);color:var(--muted);font-family:ui-monospace,"SFMono-Regular",Consolas,monospace;font-size:10px;font-weight:750;letter-spacing:.06em;line-height:1.7}
 .kicker{font-size:13px;font-weight:950;letter-spacing:.14em;margin:0 0 16px}
 h1{font-size:clamp(52px,8vw,104px);line-height:.88;margin:0;letter-spacing:-.065em}
@@ -101,7 +101,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,te
 outline:4px solid var(--blue);outline-offset:3px}
 .body{overflow-wrap:anywhere}
 @media(max-width:860px){.hero{grid-template-columns:1fr}.hero-main{min-height:500px;border-right:0;border-bottom:3px dashed var(--ink)}
-.hero-stub{grid-template-columns:1fr 1fr;gap:22px}.stub-note{grid-column:1/-1}.manifest{grid-template-columns:1fr}}
+.hero-stub{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px}.stub-note{grid-column:1/-1}.manifest{grid-template-columns:1fr}}
 @media(max-width:760px){.shell{width:min(100% - 18px,1180px)}.grid{grid-template-columns:1fr}
 .hero,.card,.retained{border-radius:20px}.hero-main{min-height:470px;padding:28px 22px}.hero-stub{grid-template-columns:1fr;padding:28px 22px}
 .stub-note{grid-column:auto}.hero-meta{width:100%;gap:10px}.manifest{margin:54px 0;padding-bottom:26px}.manifest h2{font-size:40px;letter-spacing:.02em}

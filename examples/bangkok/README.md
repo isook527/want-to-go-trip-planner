@@ -5,7 +5,7 @@
 - `bangkok-evidence-library.json`：证据库示例。
 - `bangkok-route.json`：两日路线与地点顺序。
 - `bangkok-lightweight.json`：轻量护照示例，标题故意写三日游，用于验证天数不符提示。
-- [`passport.html`](passport.html)：从证据库和路线生成的可离线护照。
+- [在线查看 · View online](https://isook527.github.io/want-to-go-trip-planner/)。离线文件为 [`passport.html`](passport.html)。
 
 在仓库根目录运行以下命令。先把示例库复制到临时目录，保留原样例。
 

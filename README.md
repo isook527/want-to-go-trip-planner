@@ -4,7 +4,7 @@
 
 ![曼谷护照总览，左为手机，右为桌面](docs/images/bangkok-passport-overview.png)
 
-[English](README.en.md) · [下载 Skill](https://github.com/isook527/want-to-go-trip-planner/releases/latest) · [查看曼谷示例](examples/bangkok/passport.html)
+[English](README.en.md) · [下载 Skill](https://github.com/isook527/want-to-go-trip-planner/releases/latest) · [查看曼谷示例](https://isook527.github.io/want-to-go-trip-planner/)
 
 ## 从收藏到出发
 
