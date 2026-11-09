@@ -43,13 +43,13 @@
 
 ## 安装
 
-1. 下载并解压 [Skill ZIP](dist/want-to-go-trip-planner-skill-3.1.0.zip)，也可以复制整个 [Skill 文件夹](skills/want-to-go-trip-planner)。
+1. 下载并解压 [Skill ZIP](dist/want-to-go-trip-planner-skill-3.2.0.zip)，也可以复制整个 [Skill 文件夹](skills/want-to-go-trip-planner)。
 2. 将 `want-to-go-trip-planner` 文件夹放进 Agent 的本地 Skills 目录。Codex 可放在 `~/.codex/skills/`，Claude Code 可放在 `~/.claude/skills/`。重新打开 Agent 后即可调用。
 3. 发一张旅行截图，从上面的收藏示例开始。已有收藏时，可以让 Agent 继续使用原来的库。
 
 | 流程 | 用途 | 环境 |
 | --- | --- | --- |
-| 本地库 | 快速收藏、查询已有 SQLite 库、地图链接和轻量行程 | Python 3.9+ |
+| 本地库 | 快速收藏、查询已有 SQLite 库、地图链接和轻量行程 | Python 3.9+。生成 HTML 另需 Node.js 18+。 |
 | 证据流程 | 带截图配图的护照、版本化 JSON 库、路线历史和行前复核 | Python 3.9+、Node.js 18+。图片处理用 Pillow，本地 OCR 和视频拆帧用可用的 Vision/Tesseract 与 FFmpeg。 |
 
 Skill 免费，采用 MIT 许可证。运行时使用本地文件和 Agent 已有能力。地图搜索链接不需要配置地图 API Key。迁移旧库前先复制库文件和资产目录。旧 SQLite 库和 JSON 库各自沿用原来的流程。
@@ -90,9 +90,9 @@ printf '输出目录：%s\n' "$out"
 
 Want to Go is a free, MIT-licensed skill that turns travel screenshots, links, videos and notes into a local destination library, a photo-rich place passport and a day-by-day itinerary. The Hangzhou screenshots above show an example of the library data and actual passport output.
 
-Unzip the [Skill download](dist/want-to-go-trip-planner-skill-3.1.0.zip) and put the `want-to-go-trip-planner` folder in your agent’s skills directory. Try “Save these travel screenshots to my Hangzhou library,” then “Use the evidence workflow to make a photo-rich two-day passport from my saved places.”
+Unzip the [Skill download](dist/want-to-go-trip-planner-skill-3.2.0.zip) and put the `want-to-go-trip-planner` folder in your agent’s skills directory. Try “Save these travel screenshots to my Hangzhou library,” then “Use the evidence workflow to make a photo-rich two-day passport from my saved places.”
 
-The lightweight workflow runs on Python 3.9+. The evidence workflow uses Node.js 18+ for rich HTML and Pillow for image processing. You can view the passport offline, print it to PDF, and export an XLSX or ICS file.
+Library commands run on Python 3.9+. Both workflows use Node.js 18+ to render the same passport layout. The evidence workflow uses Pillow for image processing. You can view the passport offline, print it to PDF, and export an XLSX or ICS file.
 
 [English workflow](skills/want-to-go-trip-planner/references/workflow.en-US.md) · [Evidence workflow](skills/want-to-go-trip-planner/references/evidence-workflow.md) · [English example](examples/itinerary.en-US.json)
 
@@ -101,5 +101,5 @@ The lightweight workflow runs on Python 3.9+. The evidence workflow uses Node.js
 ```bash
 python3 -m pip install Pillow
 python3 -m unittest discover -s tests
-python3 skills/want-to-go-trip-planner/scripts/build_release.py --zip dist/want-to-go-trip-planner-skill-3.1.0.zip
+python3 skills/want-to-go-trip-planner/scripts/build_release.py --zip dist/want-to-go-trip-planner-skill-3.2.0.zip
 ```

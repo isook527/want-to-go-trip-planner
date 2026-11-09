@@ -1,7 +1,7 @@
 {
   "schemaVersion": "kornvia-skill-release-manifest-1",
   "packageName": "want-to-go-trip-planner",
-  "packageVersion": "3.1.0",
+  "packageVersion": "3.2.0",
   "contractVersion": "2.4.0",
   "rootDirectory": "want-to-go-trip-planner",
   "fileCount": 29,
@@ -13,8 +13,8 @@
     },
     {
       "path": "SKILL.md",
-      "size": 4321,
-      "sha256": "4f26326c9a30ed6f62e2d468d5e1916fd52bffa1d57ee50f7d833b23f2384037"
+      "size": 4632,
+      "sha256": "c429b24c83e466db7e7a301715fa3a087551d0e2daa1c94958f69832eaa670ee"
     },
     {
       "path": "agents/openai.yaml",
@@ -24,17 +24,17 @@
     {
       "path": "config/product.json",
       "size": 6420,
-      "sha256": "e70c991cc7684ba8a79364d921c406fb8b31435a769fc640a2458075338c8e3c"
+      "sha256": "3fe31f759320afccfc3de01561e690bc8a92448733b3abbab137113f3a1b7a6c"
     },
     {
       "path": "references/evidence-workflow.md",
-      "size": 7747,
-      "sha256": "78cfb080f1510357928aeb60a77a4feb64d2f55f70e6ce4dc2aa255027db6349"
+      "size": 8031,
+      "sha256": "726f3812b014c3cf34b8cc8f17a9da721aff060a8edcb4dc8986959b898cf4fe"
     },
     {
       "path": "references/itinerary-quality.md",
-      "size": 3878,
-      "sha256": "4adc5f7ec66288898f9f082c5513134d017c1f92bac752eece8b22e314a85ce0"
+      "size": 5227,
+      "sha256": "c17553b1eac9ef046204a8b3f9b3bd1a5401fa7674cf298b8f0e8ff69e4cc1a5"
     },
     {
       "path": "references/place-resolution.md",
@@ -43,8 +43,8 @@
     },
     {
       "path": "references/planning-and-exports.md",
-      "size": 4193,
-      "sha256": "8f36266e5ad03738e0ad527e4d562a274eeb525c137d8c55a6ab76b6c40addd6"
+      "size": 4251,
+      "sha256": "71dda5caa491539730d8f83a70962b907ddfe1a5a6c6f9e1a8e5f5dc90a13849"
     },
     {
       "path": "references/provider-support.md",
@@ -53,28 +53,28 @@
     },
     {
       "path": "references/shared-data-contract-v2.schema.json",
-      "size": 48367,
-      "sha256": "06980f82820f8e54d40ddd9017513ffade67ebcf11ab584e504ee4779699aca1"
+      "size": 48664,
+      "sha256": "2fea85c5c71d9d76b50f0d24123bf4e697faede878828af442c6f00d7a2b4ef9"
     },
     {
       "path": "references/workflow.en-US.md",
-      "size": 7160,
-      "sha256": "131a11bf6f5663070ba074f11123bb031532bcf5d87b8877188061b6958de405"
+      "size": 7567,
+      "sha256": "30da15cece2fd26a22b7bbb927407eac7c9a8c39c27be42a7a39e52e28853dc2"
     },
     {
       "path": "references/workflow.zh-CN.md",
-      "size": 9832,
-      "sha256": "0668d8aee0750711fd3cf1690f99d22a15e66d513df57a77c2af6c3e80daa2bd"
+      "size": 10276,
+      "sha256": "56a5cbd59cee4fe61be2f5516e945ec9af6796a5f50cbe3aff7b884319251c4c"
     },
     {
       "path": "renderer/kornvia-brand.mjs",
-      "size": 11100,
-      "sha256": "1cd28673aef0cf89745ca3bccbc3da0c548296f915487c37c51ad5ecd48a195e"
+      "size": 12748,
+      "sha256": "43be60ac3551ec92e323073b87f5f81e64b852b205eef7741ecedcae8a4f705e"
     },
     {
       "path": "renderer/render_report.mjs",
-      "size": 28741,
-      "sha256": "e5e5654a0fca5f39637d6c8b52dc5a5df971e6bff4441bff3cf541707fbc0529"
+      "size": 30918,
+      "sha256": "4c7a1e125822e71e2296a553a12ed7921a5c8d1ccb9f93489a2af58608bfb47d"
     },
     {
       "path": "scripts/build_release.py",
@@ -108,8 +108,8 @@
     },
     {
       "path": "scripts/library.py",
-      "size": 22170,
-      "sha256": "cd841cdf99a05676b29b462c10fcff5b1337967773e5a53211a80763c5654487"
+      "size": 22501,
+      "sha256": "3027f8038fc5fcb1664b2da8398341e3aa1672f6872187106aa2080460c0fe4b"
     },
     {
       "path": "scripts/ocr.py",
@@ -133,18 +133,18 @@
     },
     {
       "path": "scripts/render.py",
-      "size": 6812,
-      "sha256": "815f13b59c363c549c136d9bc329b8a491bab0f4408fb5f42ba264bb5f09f2bf"
+      "size": 5710,
+      "sha256": "f491d704fa398510e7d114d3b38a52c333dda5a01e4f559a418363859d774b93"
     },
     {
       "path": "scripts/route_quality.py",
-      "size": 10570,
-      "sha256": "5cdda8fd03de18caaeb70377bbe6b40aac5d166d5230c15d7c21e422501522d3"
+      "size": 14081,
+      "sha256": "35c07bff487ea5c058ac9ec317ee667633c66bf4bba216979834048c90114919"
     },
     {
       "path": "scripts/want_to_go.py",
-      "size": 195886,
-      "sha256": "d8c5d814d48c847a17774d4fd87f36e763def0f615c69f5b06db7a7b7da92cc4"
+      "size": 200427,
+      "sha256": "eecc26980cb506e884ed7991f1ba9a5b4a519be046669235f9b7cb8d174f19d7"
     },
     {
       "path": "scripts/windows_acl.py",

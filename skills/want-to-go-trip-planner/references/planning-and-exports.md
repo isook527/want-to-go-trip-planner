@@ -8,7 +8,7 @@ Read [itinerary quality](itinerary-quality.md) for thresholds, opening windows a
 
 ## Files · 导出
 
-- **HTML**: use `scripts/render.py` for the local library, or `renderer/render_report.mjs` for the evidence workflow. To save **PDF**, use the browser’s Print → Save as PDF on the local HTML. The print styles are built in; no upload is needed.
+- **HTML**: use `scripts/render.py` for the local library, or `renderer/render_report.mjs` for the evidence workflow. Both use the same Node.js 18+ renderer and customer scan. To save **PDF**, use the browser’s Print → Save as PDF on the local HTML. The print styles are built in; no upload is needed.
 - **XLSX** and **ICS**: use `scripts/export_itinerary.py` with the same travel-facing JSON passed to the renderer. For example:
 
   ```bash

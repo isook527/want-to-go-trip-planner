@@ -37,6 +37,8 @@ python3 /absolute/path/to/skill/scripts/render.py /absolute/path/passport.json /
 python3 /absolute/path/to/skill/scripts/want_to_go.py scan --mode customer --path /absolute/path/passport.html
 ```
 
+Lightweight HTML uses the shared passport template and requires Node.js 18+. Set optional `area` with `library.py update` using the area name supported by a verified address. Use traveler-facing language. The `scan --mode customer` gate blocks internal codes and raw timestamps. For an evidence route, use `lint-route` to resolve `blocking` findings, explain `suggest` items and treat `info` as reminders.
+
 Input format: `{"locale":"en-US","title":"Bangkok Places Passport","city":"Bangkok","map_region":"outside_mainland","places":[{"name":"Wat Arun","address":"","hours":"","note":""}],"days":[{"title":"Day 1","visits":[{"period":"Morning","place":"Wat Arun","detail":"Visit"}]}]}`. For mixed regions set `map_region` per place. For unknown regions use `unknown` until confirmed. Each map link searches for the name, address and city and requires the traveler to confirm the right location. Deliver the HTML and input JSON and say where they were saved. The HTML can be opened offline; opening a map requires internet access.
 
 When the user requests a trip plan, ask for the destination, dates or number of days, and relevant traveler needs unless already known. Prioritize saved and verified places; group visits by day and allow breaks. Do not invent opening hours or travel times; use morning, afternoon and evening when exact times are unsupported. Put uncertain places in an optional list. Each visit place must exactly match a name in `places`. Update files if the user asks for changes.

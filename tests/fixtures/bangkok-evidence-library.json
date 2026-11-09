@@ -1,0 +1,317 @@
+{
+  "schemaVersion": "2.4.0",
+  "id": "library-demo",
+  "revision": 2,
+  "createdAt": "2026-08-09T00:00:00Z",
+  "updatedAt": "2026-11-09T09:52:42Z",
+  "destinations": [
+    {
+      "id": "destination-bangkok",
+      "key": "bangkok",
+      "name": "曼谷",
+      "status": "confirmed",
+      "sourceIds": [
+        "source-shot-commons",
+        "source-link-commons"
+      ],
+      "placeIds": [
+        "place-commons",
+        "place-watpho",
+        "place-jodd",
+        "place-iconsiam"
+      ],
+      "sortOrder": 0,
+      "createdAt": "2026-08-09T00:00:00Z",
+      "updatedAt": "2026-11-09T09:52:42Z",
+      "passportGeneratedAt": "2026-11-09T09:52:42Z",
+      "placeCount": 4
+    }
+  ],
+  "places": [
+    {
+      "id": "place-commons",
+      "destinationKey": "bangkok",
+      "destinationStatus": "confirmed",
+      "name": "theCOMMONS Thonglor",
+      "placeType": "business",
+      "branch": "Thonglor",
+      "sourceIds": [
+        "source-shot-commons",
+        "source-link-commons"
+      ],
+      "sortOrder": 0,
+      "createdAt": "2026-08-09T00:00:00Z",
+      "updatedAt": "2026-08-09T00:00:00Z",
+      "address": "151 Soi Thong Lo 17, Khlong Tan Nuea, Watthana, Bangkok",
+      "openingHoursText": "每日 08:00–01:00",
+      "signature": "社区型商场，多家早午餐和咖啡店集中",
+      "visitTip": "周末早午餐时段人多，建议 10 点前到",
+      "mediaIds": []
+    },
+    {
+      "id": "place-watpho",
+      "destinationKey": "bangkok",
+      "destinationStatus": "confirmed",
+      "name": "Wat Pho 卧佛寺",
+      "placeType": "venue",
+      "sourceIds": [
+        "source-shot-commons",
+        "source-link-commons"
+      ],
+      "sortOrder": 1,
+      "createdAt": "2026-08-09T00:00:00Z",
+      "updatedAt": "2026-08-09T00:00:00Z",
+      "address": "2 Sanam Chai Rd, Phra Borom Maha Ratchawang, Phra Nakhon, Bangkok",
+      "openingHoursText": "每日 08:00–18:30",
+      "signature": "46 米长的卧佛和泰式按摩学校",
+      "visitTip": "需遮肩遮膝，早上 8 点开门时人最少",
+      "mediaIds": []
+    },
+    {
+      "id": "place-jodd",
+      "destinationKey": "bangkok",
+      "destinationStatus": "confirmed",
+      "name": "Jodd Fairs Rama 9",
+      "placeType": "public_space",
+      "sourceIds": [
+        "source-shot-commons",
+        "source-link-commons"
+      ],
+      "sortOrder": 2,
+      "createdAt": "2026-08-09T00:00:00Z",
+      "updatedAt": "2026-08-09T00:00:00Z",
+      "address": "Rama IX Rd, Huai Khwang, Bangkok",
+      "openingHoursText": "每日 16:00–24:00（摊位各自安排）",
+      "signature": "网红夜市，火山排骨和水果摊",
+      "visitTip": "晚上 7 点后人流最高，MRT 拉玛九站步行可达",
+      "mediaIds": []
+    },
+    {
+      "id": "place-iconsiam",
+      "destinationKey": "bangkok",
+      "destinationStatus": "confirmed",
+      "name": "ICONSIAM",
+      "placeType": "business",
+      "sourceIds": [
+        "source-shot-commons",
+        "source-link-commons"
+      ],
+      "sortOrder": 3,
+      "createdAt": "2026-08-09T00:00:00Z",
+      "updatedAt": "2026-08-09T00:00:00Z",
+      "address": "299 Charoen Nakhon Rd, Khlong Ton Sai, Khlong San, Bangkok",
+      "openingHoursText": "每日 10:00–22:00",
+      "signature": "河畔商场，室内水上市场 SookSiam",
+      "visitTip": "可从 Sathorn 码头坐免费接驳船",
+      "mediaIds": []
+    }
+  ],
+  "sources": [
+    {
+      "id": "source-shot-commons",
+      "ledgerVersion": 1,
+      "batchId": "batch-demo",
+      "group": "place-commons",
+      "type": "screenshot",
+      "status": "captured",
+      "destinationKey": "bangkok",
+      "submittedAt": "2026-08-09T00:00:00Z",
+      "sourcePolicy": {
+        "version": "2.3.0",
+        "accessLevel": "local_only",
+        "canSupport": [
+          "screenshot_content"
+        ],
+        "cannotProve": [
+          "original_url"
+        ],
+        "untrustedInstructionsDetected": false
+      },
+      "mediaIds": []
+    },
+    {
+      "id": "source-link-commons",
+      "ledgerVersion": 1,
+      "batchId": "batch-demo",
+      "group": "place-commons",
+      "type": "link",
+      "status": "captured",
+      "destinationKey": "bangkok",
+      "submittedAt": "2026-08-09T00:00:00Z",
+      "submittedUrl": "https://example.com/customer-submitted",
+      "sourcePolicy": {
+        "version": "2.3.0",
+        "accessLevel": "public_readable",
+        "canSupport": [
+          "original_url",
+          "public_page_facts"
+        ],
+        "cannotProve": [
+          "future_opening_status"
+        ],
+        "untrustedInstructionsDetected": false
+      },
+      "mediaIds": []
+    }
+  ],
+  "media": [],
+  "verificationSnapshots": [
+    {
+      "id": "snapshot-bangkok-20260809",
+      "destinationKey": "bangkok",
+      "trigger": "agreed_date_once",
+      "agreedReviewDate": "2026-08-09",
+      "agreementConfirmed": true,
+      "checkedAt": "2026-08-09T00:00:00Z",
+      "sourcePolicyVersion": "2.3.0",
+      "items": [
+        {
+          "placeId": "place-commons",
+          "accessLevel": "public_readable",
+          "canSupport": [
+            "opening_hours_observed"
+          ],
+          "cannotProve": [
+            "future_queue"
+          ],
+          "facts": {
+            "openingHoursText": "每日 08:00–01:00"
+          },
+          "factAudits": [
+            {
+              "field": "openingHoursText",
+              "status": "verified",
+              "sources": [
+                {
+                  "url": "https://example.com/official-hours",
+                  "label": "商户公开营业信息",
+                  "kind": "official"
+                }
+              ],
+              "cannotProve": [
+                "future_queue"
+              ],
+              "nextAction": "出发当天再次确认",
+              "checkedAt": "2026-08-09T00:00:00Z",
+              "validUntil": "2026-08-16T00:00:00Z"
+            }
+          ],
+          "executionRisks": []
+        }
+      ],
+      "tripRisks": [
+        {
+          "type": "weather_sensitive",
+          "scope": "trip",
+          "status": "unverified",
+          "summary": "临近出发日再查官方天气预警",
+          "sources": [],
+          "cannotProve": [
+            "future_weather"
+          ],
+          "nextAction": "约定复核日查看官方预警",
+          "checkedAt": "2026-08-09T00:00:00Z"
+        }
+      ],
+      "changes": [
+        {
+          "placeId": "place-commons",
+          "field": "openingHoursText",
+          "before": "",
+          "after": "每日 08:00–01:00"
+        }
+      ]
+    }
+  ],
+  "tripRequests": [],
+  "routePlans": [
+    {
+      "id": "route-plan-bangkok-demo",
+      "destinationKey": "bangkok",
+      "locale": "zh-CN",
+      "title": "曼谷两日路线",
+      "status": "active",
+      "generationMode": "ai_assisted",
+      "humanReviewStatus": "not_reviewed",
+      "mapStyle": "schematic",
+      "tripProfile": {
+        "days": 2,
+        "partySize": 2,
+        "walkingLimit": "每天不超过 8 公里"
+      },
+      "days": [
+        {
+          "day": 1,
+          "title": "老城与河岸",
+          "summary": "上午老城寺庙，下午沿河到对岸商场。",
+          "stops": [
+            {
+              "placeId": "place-watpho",
+              "timeBlock": "morning"
+            },
+            {
+              "placeId": "place-iconsiam",
+              "timeBlock": "afternoon"
+            }
+          ],
+          "connections": []
+        },
+        {
+          "day": 2,
+          "title": "通罗与拉玛九",
+          "summary": "白天通罗慢逛，晚上夜市。",
+          "stops": [
+            {
+              "placeId": "place-commons",
+              "timeBlock": "morning"
+            },
+            {
+              "placeId": "place-jodd",
+              "timeBlock": "evening"
+            }
+          ],
+          "connections": []
+        }
+      ],
+      "unassigned": [],
+      "assumptions": [
+        "以住宿位置和公开交通信息作为编排参考"
+      ],
+      "cannotProve": [
+        "live_traffic",
+        "future_opening_status",
+        "human_review"
+      ],
+      "createdAt": "2026-08-09T00:00:00Z",
+      "updatedAt": "2026-08-09T00:00:00Z"
+    }
+  ],
+  "events": [
+    {
+      "id": "event-f8d17b0f05b4",
+      "operationId": "passport:bangkok:8addd00e05c4",
+      "type": "passport.generate",
+      "createdAt": "2026-11-09T09:52:42Z",
+      "undoable": false,
+      "entityId": "bangkok",
+      "after": {
+        "output": "passport.json",
+        "contentDepth": "standard",
+        "visitorMode": false
+      }
+    }
+  ],
+  "tombstones": [],
+  "ingestBatches": [
+    {
+      "id": "batch-demo",
+      "destination": "曼谷",
+      "sourceIds": [
+        "source-shot-commons",
+        "source-link-commons"
+      ],
+      "createdAt": "2026-08-09T00:00:00Z"
+    }
+  ],
+  "bundles": []
+}
