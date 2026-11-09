@@ -1296,6 +1296,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
         missing = {"installed": False, "version": "", "ready": False}
         with (
             mock.patch.object(EXTRACT.sys, "platform", "win32"),
+            mock.patch.object(EXTRACT, "opencli_probe", return_value=missing),
             mock.patch.object(EXTRACT, "pillow_probe", return_value=missing),
             mock.patch.object(
                 EXTRACT,
@@ -1352,6 +1353,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
         missing = {"installed": False, "version": "", "ready": False}
         with (
             mock.patch.object(EXTRACT.sys, "platform", "win32"),
+            mock.patch.object(EXTRACT, "opencli_probe", return_value=missing),
             mock.patch.object(
                 EXTRACT,
                 "pillow_probe",
