@@ -1,9 +1,9 @@
 {
-  "version": "3.0.0",
+  "version": "3.0.1",
   "contractVersion": "2.4.0",
   "sourcePolicyVersion": "2.3.0",
-  "passportTemplateMarker": "kornvia-passport-3.0.0",
-  "installDoctorMarker": "kornvia-install-doctor-3.0.0",
+  "passportTemplateMarker": "kornvia-passport-3.0.1",
+  "installDoctorMarker": "kornvia-install-doctor-3.0.1",
   "runtimeDependencies": {
     "opencli": {
       "expectedVersion": "1.8.6",

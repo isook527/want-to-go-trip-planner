@@ -6,7 +6,7 @@
 
 ## 安装
 
-1. 下载 [单 Skill ZIP](dist/want-to-go-trip-planner-skill-3.0.0.zip) 并解压，或从源码复制整个 [Skill 文件夹](skills/want-to-go-trip-planner)。
+1. 下载 [单 Skill ZIP](dist/want-to-go-trip-planner-skill-3.0.1.zip) 并解压，或从源码复制整个 [Skill 文件夹](skills/want-to-go-trip-planner)。
 2. 将 `want-to-go-trip-planner` 文件夹放入支持本地 Skill 的 Agent（例如 Codex 的 `~/.codex/skills/`，或 Claude Code 的 `~/.claude/skills/`），重新打开 Agent。已装旧版时，请停用旧 Skill 以免重复触发。
 3. 发一张旅行截图或一条链接，说：“用想去就出发收藏这些地方。”准备好后，可以说：“从我收藏的地方里，给我排一个三天行程。每天留午休，避开太多步行。”
 
@@ -21,7 +21,7 @@
 
 Save screenshots, links, original videos and notes. Ask your agent to organize saved places, build a map-linked passport and daily itinerary, revise it, or check changes before your trip. Every feature is free and open source under MIT. No account, activation, map API key or Kornvia backend is needed.
 
-Unzip the [Skill download](dist/want-to-go-trip-planner-skill-3.0.0.zip) and place the `want-to-go-trip-planner` folder in your agent’s skills directory. Try: “Use Want to Go to save these places,” then “Make me a three-day trip from my saved places, with fewer transfers and a lunch break each day.”
+Unzip the [Skill download](dist/want-to-go-trip-planner-skill-3.0.1.zip) and place the `want-to-go-trip-planner` folder in your agent’s skills directory. Try: “Use Want to Go to save these places,” then “Make me a three-day trip from my saved places, with fewer transfers and a lunch break each day.”
 
 The lightweight workflow only needs Python 3.9+. The evidence workflow uses Node.js 18+ for the photo-rich HTML renderer and Pillow for image processing. OCR, video frames and platform adapters use optional local tools. See the [English workflow](skills/want-to-go-trip-planner/references/workflow.en-US.md) and [evidence workflow](skills/want-to-go-trip-planner/references/evidence-workflow.md).
 
@@ -30,5 +30,5 @@ The lightweight workflow only needs Python 3.9+. The evidence workflow uses Node
 ```bash
 python3 -m pip install Pillow
 python3 -m unittest discover -s tests
-python3 skills/want-to-go-trip-planner/scripts/build_release.py --zip dist/want-to-go-trip-planner-skill-3.0.0.zip
+python3 skills/want-to-go-trip-planner/scripts/build_release.py --zip dist/want-to-go-trip-planner-skill-3.0.1.zip
 ```

@@ -9,6 +9,7 @@ not become a place card's main image.
 from __future__ import annotations
 
 import argparse
+import base64
 import csv
 import json
 import math
@@ -51,11 +52,13 @@ def apply_and_verify_windows_private_acl(path: Path, sid: str, directory: bool =
     if not powershell:
         return False
     script = r"""
-param([string]$Target, [string]$ExpectedSid, [string]$DirectoryFlag)
+$Target = $env:WTG_ACL_TARGET
+$ExpectedSid = $env:WTG_ACL_SID
+$DirectoryFlag = $env:WTG_ACL_DIRECTORY
 $ErrorActionPreference = 'Stop'
 $acl = Get-Acl -LiteralPath $Target
 $acl.SetAccessRuleProtection($true, $false)
-foreach ($existing in @($acl.Access)) { [void]$acl.RemoveAccessRuleSpecific($existing) }
+foreach ($existing in @($acl.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]))) { [void]$acl.RemoveAccessRuleSpecific($existing) }
 $identity = [System.Security.Principal.SecurityIdentifier]::new($ExpectedSid)
 if ($DirectoryFlag -eq 'true') {
   $inheritance = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
@@ -67,19 +70,23 @@ if ($DirectoryFlag -eq 'true') {
 [void]$acl.AddAccessRule($newRule)
 Set-Acl -LiteralPath $Target -AclObject $acl
 $acl = Get-Acl -LiteralPath $Target
-$rules = @($acl.Access)
+$rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
 if (-not $acl.AreAccessRulesProtected -or $rules.Count -ne 1) { exit 41 }
 $rule = $rules[0]
-$ruleSid = $rule.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value
+$ruleSid = $rule.IdentityReference.Value
 $full = [System.Security.AccessControl.FileSystemRights]::FullControl
 $hasFull = (([int]$rule.FileSystemRights -band [int]$full) -eq [int]$full)
 if ($ruleSid -ne $ExpectedSid -or $rule.AccessControlType -ne 'Allow' -or -not $hasFull) { exit 42 }
 """
+    command = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
     result = subprocess.run(
-        [
-            powershell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-            "-Command", f"& {{ {script} }}", str(path), sid, str(bool(directory)).lower(),
-        ],
+        [powershell, "-NoProfile", "-NonInteractive", "-EncodedCommand", command],
+        env={
+            **os.environ,
+            "WTG_ACL_TARGET": str(Path(path).absolute()),
+            "WTG_ACL_SID": sid,
+            "WTG_ACL_DIRECTORY": str(bool(directory)).lower(),
+        },
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         timeout=30, check=False,
     )

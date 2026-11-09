@@ -2823,7 +2823,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
         self.assertIn("Image preparation arguments", json.loads(result.stderr)["message"])
 
     def test_94_release_manifest_matches_archive_and_detects_tampering(self):
-        archive_path = ROOT / "dist" / "want-to-go-trip-planner-skill-3.0.0.zip"
+        archive_path = ROOT / "dist" / "want-to-go-trip-planner-skill-3.0.1.zip"
         self.assertTrue(archive_path.is_file())
         with zipfile.ZipFile(archive_path) as archive:
             self.assertEqual(W2G.release_manifest_issues(archive), [])
@@ -3275,7 +3275,8 @@ class PublicSkillRegressionTests(unittest.TestCase):
             evidence_rollbacks = list(base.glob(".*.rollback"))
             self.assertEqual(len(evidence_rollbacks), 1)
             self.assertEqual(evidence_rollbacks[0].read_bytes(), b"")
-            self.assertEqual(evidence_rollbacks[0].stat().st_mode & 0o777, 0o600)
+            if not sys.platform.startswith("win"):
+                self.assertEqual(evidence_rollbacks[0].stat().st_mode & 0o777, 0o600)
             old_time = EXTRACT.time.time() - EXTRACT.ROLLBACK_STALE_SECONDS - 1
             EXTRACT.os.utime(evidence_rollbacks[0], (old_time, old_time))
             EXTRACT.write_result({"newer": True}, str(output))
@@ -3299,7 +3300,8 @@ class PublicSkillRegressionTests(unittest.TestCase):
             image_rollbacks = list(base.glob(".*.rollback"))
             self.assertEqual(len(image_rollbacks), 1)
             self.assertEqual(image_rollbacks[0].read_bytes(), b"")
-            self.assertEqual(image_rollbacks[0].stat().st_mode & 0o777, 0o600)
+            if not sys.platform.startswith("win"):
+                self.assertEqual(image_rollbacks[0].stat().st_mode & 0o777, 0o600)
             old_time = DISPLAY.time.time() - DISPLAY.ROLLBACK_STALE_SECONDS - 1
             DISPLAY.os.utime(image_rollbacks[0], (old_time, old_time))
             DISPLAY.prepare_display_image(str(source), str(target))
@@ -3308,7 +3310,7 @@ class PublicSkillRegressionTests(unittest.TestCase):
     @unittest.skipUnless(sys.platform.startswith("win"), "Windows ACL integration test")
     def test_110_windows_private_acl_integration(self):
         with tempfile.TemporaryDirectory() as tmp:
-            target = Path(tmp) / "customer-evidence.json"
+            target = Path(tmp) / "evidence [test] é.json"
             target.write_text("private", encoding="utf-8")
             EXTRACT.restrict_path_to_current_user(target)
             sid = EXTRACT.windows_current_user_sid()

@@ -1,7 +1,7 @@
 {
   "schemaVersion": "kornvia-skill-release-manifest-1",
   "packageName": "want-to-go-trip-planner",
-  "packageVersion": "3.0.0",
+  "packageVersion": "3.0.1",
   "contractVersion": "2.4.0",
   "rootDirectory": "want-to-go-trip-planner",
   "fileCount": 25,
@@ -24,7 +24,7 @@
     {
       "path": "config/product.json",
       "size": 6420,
-      "sha256": "3cff0cd782a3e29bf2b514b8127a27abd9b06ce613c18224df081ef6c04834ca"
+      "sha256": "b94254a549bd5f24a6d4d855d3d857ed0c57c6c5f89d0d0402f12619219f1ecd"
     },
     {
       "path": "references/evidence-workflow.md",
@@ -93,8 +93,8 @@
     },
     {
       "path": "scripts/extract_evidence.py",
-      "size": 108761,
-      "sha256": "6cb5ed4460e4007ce5c7b0dd05e83d14e9798455cb677f5f5de116b0fed67861"
+      "size": 109054,
+      "sha256": "5ebdcd92b538806aa1c5dac6cba64a494e04d2763d29560fd85a8433240b7fbf"
     },
     {
       "path": "scripts/library.py",
@@ -113,8 +113,8 @@
     },
     {
       "path": "scripts/prepare_display_image.py",
-      "size": 16393,
-      "sha256": "4782d4d0fcfad742729ae3d91cfeaa2ae4002a41ff6088bd32375f1f3dbb1aa5"
+      "size": 16686,
+      "sha256": "df3627966accfccf5659e92c15a1594b6e9aaf6087d7fa9186e030d230c4cc41"
     },
     {
       "path": "scripts/prepare_image_macos.swift",
